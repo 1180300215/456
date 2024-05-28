@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ChangeListManager">
+    <list default="true" id="a2b72708-7342-4514-b20c-2882cea06853" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/deployment_stage/collect_data.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/deployment_stage/hmy_test.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/deployment_stage/online_training.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/deployment_stage/test.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/deployment_stage/utility/gen_test_ind.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/deployment_stage/utility/mix_oppo_indexes.npy" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/deployment_stage/utility/seen_oppo_indexes.npy" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/deployment_stage/utility/unseen_oppo_indexes.npy" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/deployment_stage/utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/markov_soccer/LICENSE" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/markov_soccer/README.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/markov_soccer/networks.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/markov_soccer/opponent_policy.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/markov_soccer/opponent_policy_models/PPO_100000.pt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/markov_soccer/opponent_policy_models/PPO_50000.pt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/markov_soccer/opponent_policy_models/TRCoPO_30000.pth" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/markov_soccer/opponent_policy_models/TRGDA_10000.pth" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/markov_soccer/ppo.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/markov_soccer/soccer_state.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/LICENSE.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/README.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/make_env.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/core.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/environment.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/multi_discrete.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/policy.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/rendering.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/scenario.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/scenarios/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/scenarios/simple.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/scenarios/simple_adversary.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/scenarios/simple_crypto.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/scenarios/simple_push.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/scenarios/simple_reference.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/scenarios/simple_speaker_listener.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/scenarios/simple_spread.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/scenarios/simple_tag.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/multiagent/scenarios/simple_world_comm.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/opponent_policy.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/opponent_policy_models/PPO_10000.pt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/opponent_policy_models/PPO_5000.pt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/ppo.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/envs/multiagent_particle_envs/setup.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/install_envs.sh" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_1/config.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_1/model/MS-pretrained_models/pel_encoder_iter_199" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_1/model/PA-pretrained_models/pel_encoder_iter_499" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_1/net.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_1/nn_trainer.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_1/train.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_1/trajectory_gpt2.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_1/utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_2/config.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_2/model/MS-pretrained_models/res_decoder_iter_1999" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_2/model/MS-pretrained_models/res_encoder_iter_1999" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_2/model/PA-pretrained_models/res_decoder_iter_1999" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_2/model/PA-pretrained_models/res_encoder_iter_1999" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_2/net.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_2/nn_trainer.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_2/train.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/offline_stage_2/utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="MarkdownSettingsMigration">
+    <option name="stateVersion" value="1" />
+  </component>
+  <component name="ProjectId" id="2fcooqVhcy82lULCq2IR54hjiQC" />
+  <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">
+    <property name="RunOnceActivity.OpenProjectViewOnStart" value="true" />
+    <property name="RunOnceActivity.ShowReadmeOnStart" value="true" />
+    <property name="WebServerToolWindowFactoryState" value="false" />
+    <property name="settings.editor.selected.configurable" value="preferences.lookFeel" />
+  </component>
+  <component name="RecentsManager">
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="E:\强化学习\实验\iclr2024-TAO\envs\multiagent_particle_envs\data" />
+    </key>
+  </component>
+  <component name="RunManager" selected="Python.data_read">
+    <configuration name="data_read" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="iclr2024-TAO" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/envs/multiagent_particle_envs/data" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/envs/multiagent_particle_envs/data/data_read.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="hmy_test" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="iclr2024-TAO" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/deployment_stage" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/deployment_stage/hmy_test.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="lab1" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="iclr2024-TAO" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/../../../研究生课/研一下/优化/23s103245何明研  实验1" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/../../../研究生课/研一下/优化/23s103245何明研  实验1/lab1.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Python.data_read" />
+        <item itemvalue="Python.hmy_test" />
+        <item itemvalue="Python.lab1" />
+      </list>
+    </recent_temporary>
+  </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="a2b72708-7342-4514-b20c-2882cea06853" name="Changes" comment="" />
+      <created>1714109909447</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1714109909447</updated>
+      <workItem from="1714109911483" duration="45357000" />
+      <workItem from="1714880852936" duration="9989000" />
+      <workItem from="1715079680447" duration="31813000" />
+      <workItem from="1715867598119" duration="62095000" />
+      <workItem from="1716871794635" duration="109000" />
+      <workItem from="1716871921908" duration="2041000" />
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="com.intellij.coverage.CoverageDataManagerImpl">
+    <SUITE FILE_PATH="coverage/iclr2024_TAO$data_read.coverage" NAME="data_read Coverage Results" MODIFIED="1716796106968" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/envs/multiagent_particle_envs/data" />
+    <SUITE FILE_PATH="coverage/iclr2024_TAO$hmy_test.coverage" NAME="hmy_test Coverage Results" MODIFIED="1716546365130" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/deployment_stage" />
+    <SUITE FILE_PATH="coverage/iclr2024_TAO$lab1.coverage" NAME="lab1 Coverage Results" MODIFIED="1715001316312" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/../../../研究生课/研一下/优化/23s103245何明研  实验1" />
+  </component>
+</project>
