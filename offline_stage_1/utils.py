@@ -82,12 +82,12 @@ def get_batch(offline_data, config_dict):
         obs_mean_list = config_dict["OBS_MEAN"]
         obs_std_list = config_dict["OBS_STD"]
     device = config_dict["DEVICE"]
-    mixed_data = [oppo_data for oppo_data_list in offline_data for oppo_data in oppo_data_list]
+    mixed_data = [oppo_data for oppo_data_list in offline_data for oppo_data in oppo_data_list] # 相当于把所有的五个对手轨迹融合到了一起
     oppo_labels = np.concatenate(
         [np.ones((num_oppo_trajs_list[i],), dtype=np.int32) * i for i in range(num_oppo_policy)],
         axis=0,
         dtype=np.int32,
-    )
+    )# 得到了 2000个（0.1.2.3.4）
     num_total_trajs = sum(num_oppo_trajs_list)
     shuffle_index = np.arange(num_total_trajs)  # 返回一个有终点和起点的固定步长的排列  所有的轨迹
     np.random.shuffle(shuffle_index)
@@ -149,6 +149,9 @@ def get_batch(offline_data, config_dict):
         return n_o, a, r, label, timesteps, mask, o_gen, a_gen, mask_gen
     
     return fn
+
+
+def get_batch_mix(offline_data,online_data,config_dict):
 
 
 def CrossEntropy(a_predict, a_label):

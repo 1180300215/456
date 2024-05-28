@@ -160,6 +160,8 @@ def main(args):
     )
     online_data = load_online_data(oppo_context_w)
 
+    print(online_data[0])
+
     LOG.info(f"Finish testing TAO.")
 
 
@@ -168,12 +170,12 @@ if __name__ == '__main__':
     # ---------- NOTE: TAO testing ----------
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", type=str, default='cuda:0')
-    parser.add_argument("--project_name", type=str, default="TEST-MS")
+    parser.add_argument("--project_name", type=str, default="TEST-PA456")
     # * remember to change ENV_TYPE in '../offline_stage_2/config.py' file to PA when testing on PA
     # parser.add_argument("--project_name", type=str, default="TEST-PA")
     parser.add_argument("--num_test", type=int, default=200)
     parser.add_argument("--switch_interval", type=int, default=50)
-    parser.add_argument("--test_mode", type=str, default="mix", choices=["seen", "unseen", "mix"])
+    parser.add_argument("--test_mode", type=str, default="unseen", choices=["seen", "unseen", "mix"])
     args = parser.parse_args()
 
     if "MS" in args.project_name:  # * MS

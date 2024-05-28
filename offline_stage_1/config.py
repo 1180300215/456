@@ -8,7 +8,7 @@ class Config:
     
     # ENV_TYPE = "PA"
     ENV_TYPE = "MS"
-    
+    USE_ONLINE = "FALSE"
     # ---------- NOTE: environment settings ----------
     if ENV_TYPE == "PA":  # * PA    
         OBS_DIM = 8  # opponent obs_dim
