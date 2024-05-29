@@ -158,9 +158,10 @@ def main(args):
         args=args,
         log_to_wandb=log_to_wandb,
     )
+    # print(oppo_context_w[0][0][0])
     online_data = load_online_data(oppo_context_w)
 
-    print(online_data[0])
+    # print(online_data[0])
 
     LOG.info(f"Finish testing TAO.")
 

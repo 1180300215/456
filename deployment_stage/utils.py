@@ -333,16 +333,16 @@ def load_online_data(oppo_context_w):
     online_data_list = [[]]
     online_cw_size = len(oppo_context_w)
     for i in range(online_cw_size):
-        num_steps = len(online_cw_size[i][0])
+        num_steps = 100
         o_ep = []
         a_ep = []
         r_ep = []
         o_next_ep = []
-        for j in range (num_steps):
-            o_ep.append(np.array(online_cw_size[i][3][j]))
-            a_ep.append(np.array(online_cw_size[i][1][j]))
-            r_ep.append(np.array(online_cw_size[i][2][j]))
-            o_next_ep.append(np.array(online_cw_size[i][0][j]))
+        for j in range(num_steps):
+            o_ep.append(np.array(oppo_context_w[i][3][j].cpu()))
+            a_ep.append(np.array(oppo_context_w[i][1][j].cpu()))
+            r_ep.append(np.array(oppo_context_w[i][2][j].cpu()))
+            o_next_ep.append(np.array(oppo_context_w[i][0][j].cpu()))
         online_data_list[0].append(
             {
                 "observations": np.array(o_ep),
