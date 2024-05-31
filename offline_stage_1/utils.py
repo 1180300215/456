@@ -152,7 +152,93 @@ def get_batch(offline_data, config_dict):
 
 
 def get_batch_mix(offline_data,online_data,config_dict):
+    obs_dim = config_dict["OBS_DIM"]
+    act_dim = config_dict["ACT_DIM"]
+    num_offline_oppo_policy = len(offline_data)
+    num_online_oppo_policy = len(online_data)
+    num_offline_oppo_trajs_list = config_dict["NUM_OPPO_TRAJS"]  # 对手各个策略交互轨迹 列表
+    batch_size = config_dict["BATCH_SIZE"]
+    K = config_dict["NUM_STEPS"]  # 最大值 每个episode
+    if config_dict["OBS_NORMALIZE"]:
+        obs_offline_mean_list = config_dict["offline_OBS_MEAN"]
+        obs_offline_std_list = config_dict["offline_OBS_STD"]
+        obs_online_mean_list = config_dict["online_OBS_MEAN"]
+        obs_online_std_list = config_dict["online_OBS_STD"]
+    device = config_dict["DEVICE"]
+    offline_mixed_data = [oppo_data for oppo_data_list in offline_data for oppo_data in oppo_data_list]  # 相当于把所有的五个对手轨迹融合到了一起
+    offline_oppo_labels = np.concatenate(
+        [np.ones((num_offline_oppo_trajs_list[i],), dtype=np.int32) * i for i in range(num_offline_oppo_policy)],
+        axis=0,
+        dtype=np.int32,
+    )  # 得到了 2000个（0.1.2.3.4）
+    online_mix_data = [oppo_data for oppo_data_list in online_data for oppo_data in oppo_data_list]
+    online_oppo_labels = np.concatenate(
+        [np.ones((num_offline_oppo_trajs_list[i],), dtype=np.int32) * (i + 5)for i in range(num_online_oppo_policy)],
+        axis=0,
+        dtype=np.int32,
+    )  # 得到几十个 5
+    num_total_trajs = sum(num_oppo_trajs_list)
+    shuffle_index = np.arange(num_total_trajs)  # 返回一个有终点和起点的固定步长的排列  所有的轨迹
+    np.random.shuffle(shuffle_index)
+    # shuffle the data and labels
+    mixed_data = [mixed_data[i] for i in shuffle_index]
+    oppo_labels = oppo_labels[shuffle_index]
+    all_indexes = [np.argwhere(oppo_labels == i).reshape(-1) for i in range(num_oppo_policy)]
 
+    def fn(batch_size=batch_size, max_len=K):
+        n_o, a, r, label, timesteps, mask, o_gen, a_gen, mask_gen = [], [], [], [], [], [], [], [], []
+        batch_inds = np.random.choice(
+            np.arange(num_total_trajs),
+            size=batch_size,
+            replace=False,
+        )  # 选取的是随机的  size个 构成数组
+        for k in range(batch_size):
+            traj = mixed_data[batch_inds[k]]
+            l = oppo_labels[batch_inds[k]]
+            index_gen = np.random.choice(all_indexes[l])  # 和 l标签相同的所有轨迹  默认随机返回一个轨迹对应的位置
+            traj_gen = mixed_data[index_gen]
+            # print(traj['next_observations'].shape)  # (dim0 is timestep, dim1 is obs_dim?)
+            n_o.append(traj['next_observations'][:max_len].reshape(1, -1, obs_dim))
+            a.append(traj['actions'][:max_len].reshape(1, -1, act_dim))
+            r.append(traj['rewards'][:max_len].reshape(1, -1, 1))
+            o_gen.append(traj_gen['observations'][:max_len].reshape(1, -1, obs_dim))
+            a_gen.append(traj_gen['actions'][:max_len].reshape(1, -1, act_dim))
+            timesteps.append(
+                np.arange(1, (n_o[-1].shape[1] + 1)).reshape(1, -1)
+            )
+            timesteps[-1][timesteps[-1] >= (max_len + 1)] = max_len
+
+            tlen = n_o[-1].shape[1]
+            tlen_gen = o_gen[-1].shape[1]
+
+            n_o[-1] = np.concatenate([np.zeros((1, max_len - tlen, obs_dim)), n_o[-1]], axis=1)
+            o_gen[-1] = np.concatenate([np.zeros((1, max_len - tlen_gen, obs_dim)), o_gen[-1]], axis=1)
+            if config_dict["OBS_NORMALIZE"]:
+                obs_mean, obs_std = obs_mean_list[l], obs_std_list[l]
+                n_o[-1] = (n_o[-1] - obs_mean) / obs_std
+                o_gen[-1] = (o_gen[-1] - obs_mean) / obs_std
+            a[-1] = np.concatenate([np.ones((1, max_len - tlen, act_dim)) * -10., a[-1]], axis=1)
+            a_gen[-1] = np.concatenate([np.ones((1, max_len - tlen_gen, act_dim)) * -10., a_gen[-1]], axis=1)
+            r[-1] = np.concatenate([np.zeros((1, max_len - tlen, 1)), r[-1]], axis=1)
+
+            label.append(l)
+            timesteps[-1] = np.concatenate([np.zeros((1, max_len - tlen)), timesteps[-1]], axis=1)
+            mask.append(np.concatenate([np.zeros((1, max_len - tlen)), np.ones((1, tlen))], axis=1))
+            mask_gen.append(np.concatenate([np.zeros((1, max_len - tlen_gen)), np.ones((1, tlen_gen))], axis=1))
+
+        n_o = torch.from_numpy(np.concatenate(n_o, axis=0)).to(dtype=torch.float32, device=device)
+        a = torch.from_numpy(np.concatenate(a, axis=0)).to(dtype=torch.float32, device=device)
+        r = torch.from_numpy(np.concatenate(r, axis=0)).to(dtype=torch.float32, device=device)
+        label = torch.from_numpy(np.array(label)).to(dtype=torch.long, device=device)
+        timesteps = torch.from_numpy(np.concatenate(timesteps, axis=0)).to(dtype=torch.long, device=device)
+        mask = torch.from_numpy(np.concatenate(mask, axis=0)).to(device=device)
+        o_gen = torch.from_numpy(np.concatenate(o_gen, axis=0)).to(dtype=torch.float32, device=device)
+        a_gen = torch.from_numpy(np.concatenate(a_gen, axis=0)).to(dtype=torch.float32, device=device)
+        mask_gen = torch.from_numpy(np.concatenate(mask_gen, axis=0)).to(device=device)
+
+        return n_o, a, r, label, timesteps, mask, o_gen, a_gen, mask_gen
+
+    return fn
 
 def CrossEntropy(a_predict, a_label):
     ce = torch.nn.CrossEntropyLoss()
