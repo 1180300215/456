@@ -271,6 +271,15 @@ def get_batch_mix(offline_data,online_data,config_dict):
             mask.append(np.concatenate([np.zeros((1, max_len - tlen)), np.ones((1, tlen))], axis=1))
             mask_gen.append(np.concatenate([np.zeros((1, max_len - tlen_gen)), np.ones((1, tlen_gen))], axis=1))
 # 差一个 混合  他们的步骤
+        all_shuffle_indexes = np.arange(batch_size)
+        np.random.shuffle(all_shuffle_indexes)
+        n_o = [n_o[i] for i in all_shuffle_indexes]
+        a = [a[i] for i in all_shuffle_indexes]
+        r = [r[i] for i in all_shuffle_indexes]
+        label = [label[i] for i in all_shuffle_indexes]
+        o_gen = [o_gen[i] for i in all_shuffle_indexes]
+        a_gen = [a_gen[i] for i in all_shuffle_indexes]
+
         n_o = torch.from_numpy(np.concatenate(n_o, axis=0)).to(dtype=torch.float32, device=device)
         a = torch.from_numpy(np.concatenate(a, axis=0)).to(dtype=torch.float32, device=device)
         r = torch.from_numpy(np.concatenate(r, axis=0)).to(dtype=torch.float32, device=device)
