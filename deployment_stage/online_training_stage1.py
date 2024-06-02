@@ -15,7 +15,7 @@ from offline_stage_1.utils import (
 import torch
 import numpy as np
 import wandb
-from deployment_stage.collect_data  import  main
+from deployment_stage.collect_data import collect_data
 if Config.RUN_OFFLINE:
     os.environ["WANDB_MODE"] = "offline"
 
@@ -67,7 +67,7 @@ def main():
         obs_offline_mean_list, obs_offline_std_list = cal_obs_mean(offline_data, total=average_total_obs)
         CONFIG_DICT["offline_OBS_MEAN"] = obs_offline_mean_list
         CONFIG_DICT["offline_OBS_STD"] = obs_offline_std_list
-    online_data = main()
+    online_data = collect_data()
     LOG.info("Finish loading online dataset.")
     if obs_normalize:
         obs_online_mean_list, obs_online_std_list = cal_obs_mean(online_data, total=average_total_obs)
@@ -100,6 +100,7 @@ def main():
     )
 
     encoder = encoder.to(device=device)
+    encoder.load_model("../offline_stage_2/model/PA-pretrained_models/res_encoder_iter_1999", device=device)
     encoder_optimizer = torch.optim.AdamW(
         encoder.parameters(),
         lr=learning_rate,
@@ -155,3 +156,4 @@ def main():
     )
 if __name__ == '__main__':
     main()
+

@@ -24,7 +24,7 @@ if Config.RUN_OFFLINE:
     os.environ["WANDB_MODE"] = "offline"
 
 
-def main(args):
+def collect_data():
     env_type = Config.ENV_TYPE
     agent_obs_dim = Config.AGENT_OBS_DIM
     oppo_obs_dim = Config.OPPO_OBS_DIM
@@ -38,10 +38,10 @@ def main(args):
 
     log_to_wandb = Config.WANDB
 
-    device = args.device
-    test_mode = args.test_mode
-    num_test = args.num_test
-    switch_interval = args.switch_interval
+    device = 'cuda:0'
+    test_mode = "unseen"
+    # num_test = 100
+    # switch_interval = 100
     hidden_dim = Config.HIDDEN_DIM
     dropout = Config.DROPOUT
     num_layer = Config.NUM_LAYER
@@ -52,14 +52,14 @@ def main(args):
     agent_index = Config.AGENT_INDEX
     oppo_index = Config.OPPO_INDEX
 
-    decoder_path = args.decoder_param_path
+    decoder_path = '../offline_stage_2/model/PA-pretrained_models/res_decoder_iter_1999'
     data_path = Config.OFFLINE_DATA_PATH
 
     seen_oppo_policy = Config.SEEN_OPPO_POLICY
     unseen_oppo_policy = Config.UNSEEN_OPPO_POLICY
 
     CONFIG_DICT = get_config_dict()
-    seed = args.seed
+    seed = 0
     torch.manual_seed(seed)
     np.random.seed(seed)
     CONFIG_DICT["SEED_RES"] = seed
@@ -113,7 +113,7 @@ def main(args):
         add_cross_attention=False,
     )
     encoder = encoder.to(device=device)
-    encoder.load_model(args.encoder_param_path, device=device)
+    encoder.load_model('../offline_stage_2/model/PA-pretrained_models/res_encoder_iter_1999', device=device)
     encoder.eval()
 
     decoder = GPTDecoder(
@@ -141,7 +141,7 @@ def main(args):
         wandb.init(
             name=exp_prefix,
             group=group_name,
-            project=args.project_name + f"-{test_mode}",
+            project="TEST523" + f"-{test_mode}",
             config=CONFIG_DICT,
         )
 
@@ -151,39 +151,38 @@ def main(args):
         encoder=encoder,
         decoder=decoder,
         env_and_test_oppo=env_and_test_oppo,
-        num_test=50,
-        switch_interval=50,
+        num_test=100,
+        switch_interval=100,
         test_oppo_policy=test_oppo_policy,
         config=CONFIG_DICT,
-        args=args,
         log_to_wandb=log_to_wandb,
     )
     # print(oppo_context_w[0][0][0])
     online_data = load_online_data(oppo_context_w)
 
     # print(online_data[0])
-
+    return online_data
     LOG.info(f"Finish testing TAO.")
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    # ---------- NOTE: TAO testing ----------
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", type=str, default='cuda:0')
-    parser.add_argument("--project_name", type=str, default="TEST-PA456")
-    # * remember to change ENV_TYPE in '../offline_stage_2/config.py' file to PA when testing on PA
-    # parser.add_argument("--project_name", type=str, default="TEST-PA")
-    parser.add_argument("--num_test", type=int, default=200)
-    parser.add_argument("--switch_interval", type=int, default=50)
-    parser.add_argument("--test_mode", type=str, default="unseen", choices=["seen", "unseen", "mix"])
-    args = parser.parse_args()
-
-    if "MS" in args.project_name:  # * MS
-        args.encoder_param_path = '../offline_stage_2/model/MS-pretrained_models/res_encoder_iter_1999'
-        args.decoder_param_path = '../offline_stage_2/model/MS-pretrained_models/res_decoder_iter_1999'
-    elif "PA" in args.project_name:  # * PA
-        args.encoder_param_path = '../offline_stage_2/model/PA-pretrained_models/res_encoder_iter_1999'
-        args.decoder_param_path = '../offline_stage_2/model/PA-pretrained_models/res_decoder_iter_1999'
-
-    main(args)
+# if __name__ == '__main__':
+#     parser = argparse.ArgumentParser()
+#     # ---------- NOTE: TAO testing ----------
+#     parser.add_argument("--seed", type=int, default=0)
+#     parser.add_argument("--device", type=str, default='cuda:0')
+#     parser.add_argument("--project_name", type=str, default="TEST-PA456")
+#     # * remember to change ENV_TYPE in '../offline_stage_2/config.py' file to PA when testing on PA
+#     # parser.add_argument("--project_name", type=str, default="TEST-PA")
+#     parser.add_argument("--num_test", type=int, default=200)
+#     parser.add_argument("--switch_interval", type=int, default=50)
+#     parser.add_argument("--test_mode", type=str, default="unseen", choices=["seen", "unseen", "mix"])
+#     args = parser.parse_args()
+#
+#     if "MS" in args.project_name:  # * MS
+#         args.encoder_param_path = '../offline_stage_2/model/MS-pretrained_models/res_encoder_iter_1999'
+#         args.decoder_param_path = '../offline_stage_2/model/MS-pretrained_models/res_decoder_iter_1999'
+#     elif "PA" in args.project_name:  # * PA
+#         args.encoder_param_path = '../offline_stage_2/model/PA-pretrained_models/res_encoder_iter_1999'
+#         args.decoder_param_path = '../offline_stage_2/model/PA-pretrained_models/res_decoder_iter_1999'
+#
+#     main(args)
