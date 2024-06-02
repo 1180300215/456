@@ -196,12 +196,12 @@ def get_batch_mix(offline_data,online_data,config_dict):
         n_o, a, r, label, timesteps, mask, o_gen, a_gen, mask_gen = [], [], [], [], [], [], [], [], []
         batch_offline_inds = np.random.choice(
             np.arange(num_offline_total_trajs),
-            size=batch_size/2,
+            size=int(batch_size/2),
             replace=False,
         )  # 选取的是随机的  size个 构成数组
-        for k in range(batch_size/2):
+        for k in range(int(batch_size/2)):
             traj = offline_mixed_data[batch_offline_inds[k]]
-            l = offline_oppo_labels[batch_inds[k]]
+            l = offline_oppo_labels[batch_offline_inds[k]]
             index_gen = np.random.choice(all_offline_indexes[l])  # 和 l标签相同的所有轨迹  默认随机返回一个轨迹对应的位置
             traj_gen = offline_mixed_data[index_gen]
 
@@ -234,14 +234,14 @@ def get_batch_mix(offline_data,online_data,config_dict):
             mask_gen.append(np.concatenate([np.zeros((1, max_len - tlen_gen)), np.ones((1, tlen_gen))], axis=1))
         batch_online_inds = np.random.choice(
             np.arange(num_online_total_trajs),
-            size=batch_size/2,
+            size=int(batch_size/2),
             replace=False,
         )
-        for s in range(batch_size/2):
+        for s in range(int(batch_size/2)):
             traj = online_mix_data[batch_online_inds[s]]
             l = online_oppo_labels[batch_online_inds[s]]
-            index_gen = np.random.choice(all_online_indexes[l])  # 和 l标签相同的所有轨迹  默认随机返回一个轨迹对应的位置
-            traj_gen = online_mixed_data[index_gen]
+            index_gen = np.random.choice(all_online_indexes[l-5])  # 和 l标签相同的所有轨迹  默认随机返回一个轨迹对应的位置
+            traj_gen = online_mix_data[index_gen]
 
             n_o.append(traj['next_observations'][:max_len].reshape(1, -1, obs_dim))    # 加入一个 1*100*8
             a.append(traj['actions'][:max_len].reshape(1, -1, act_dim))
@@ -259,7 +259,7 @@ def get_batch_mix(offline_data,online_data,config_dict):
             n_o[-1] = np.concatenate([np.zeros((1, max_len - tlen, obs_dim)), n_o[-1]], axis=1)
             o_gen[-1] = np.concatenate([np.zeros((1, max_len - tlen_gen, obs_dim)), o_gen[-1]], axis=1)
             if config_dict["OBS_NORMALIZE"]:
-                obs_mean, obs_std = obs_online_mean_list[l], obs_online_std_list[l]
+                obs_mean, obs_std = obs_online_mean_list[l-5], obs_online_std_list[l-5]
                 n_o[-1] = (n_o[-1] - obs_mean) / obs_std
                 o_gen[-1] = (o_gen[-1] - obs_mean) / obs_std
             a[-1] = np.concatenate([np.ones((1, max_len - tlen, act_dim)) * -10., a[-1]], axis=1)

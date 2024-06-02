@@ -3,9 +3,8 @@
   <component name="ChangeListManager">
     <list default="true" id="a2b72708-7342-4514-b20c-2882cea06853" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/deployment_stage/collect_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/deployment_stage/collect_data.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/deployment_stage/online_training_stage1.py" beforeDir="false" afterPath="$PROJECT_DIR$/deployment_stage/online_training_stage1.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/deployment_stage/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/deployment_stage/utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/offline_stage_1/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/offline_stage_1/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/offline_stage_1/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/offline_stage_1/utils.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -42,7 +41,7 @@
       <recent name="E:\强化学习\实验\iclr2024-TAO\envs\multiagent_particle_envs\data" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.collect_data">
+  <component name="RunManager" selected="Python.main">
     <configuration default="true" type="DjangoTestsConfigurationType">
       <module name="iclr2024-TAO" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -326,12 +325,24 @@
       <workItem from="1716871921908" duration="13760000" />
       <workItem from="1716953568946" duration="8681000" />
       <workItem from="1716963355413" duration="22377000" />
-      <workItem from="1717242846399" duration="7607000" />
+      <workItem from="1717242846399" duration="8807000" />
+      <workItem from="1717312789123" duration="6340000" />
     </task>
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.History.Properties">
+    <option name="COLUMN_ID_ORDER">
+      <list>
+        <option value="Default.Root" />
+        <option value="Default.Author" />
+        <option value="Default.Date" />
+        <option value="Default.Subject" />
+        <option value="Space.CommitStatus" />
+      </list>
+    </option>
   </component>
   <component name="Vcs.Log.Tabs.Properties">
     <option name="TAB_STATES">
