@@ -2,9 +2,8 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="a2b72708-7342-4514-b20c-2882cea06853" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/deployment_stage/evalutation.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/deployment_stage/hmy_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/deployment_stage/hmy_test.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/deployment_stage/evalutation.py" beforeDir="false" afterPath="$PROJECT_DIR$/deployment_stage/evalutation.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/deployment_stage/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/deployment_stage/utils.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -42,7 +41,7 @@
       <recent name="E:\强化学习\实验\iclr2024-TAO\envs\multiagent_particle_envs\data" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.hmy_test">
+  <component name="RunManager" selected="Python.t-SNE">
     <configuration default="true" type="DjangoTestsConfigurationType">
       <module name="iclr2024-TAO" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -208,6 +207,28 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
+    <configuration name="t-SNE" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="D:\hmy.python\anaconda3\envs\prompt\python.exe" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/deployment_stage" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <module name="" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/deployment_stage/t-SNE.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
     <configuration default="true" type="Python.FlaskServer">
       <module name="iclr2024-TAO" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -303,6 +324,7 @@
     </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.t-SNE" />
         <item itemvalue="Python.hmy_test" />
         <item itemvalue="Python.collect_data" />
         <item itemvalue="Python.data_read" />
@@ -328,7 +350,7 @@
       <workItem from="1716963355413" duration="22377000" />
       <workItem from="1717242846399" duration="8807000" />
       <workItem from="1717312789123" duration="6853000" />
-      <workItem from="1717397930288" duration="11251000" />
+      <workItem from="1717397930288" duration="20771000" />
     </task>
     <servers />
   </component>
@@ -357,21 +379,11 @@
       </map>
     </option>
   </component>
-  <component name="XDebuggerManager">
-    <breakpoint-manager>
-      <breakpoints>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/offline_stage_1/nn_trainer.py</url>
-          <line>100</line>
-          <option name="timeStamp" value="2" />
-        </line-breakpoint>
-      </breakpoints>
-    </breakpoint-manager>
-  </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/iclr2024_TAO$collect_data.coverage" NAME="collect_data Coverage Results" MODIFIED="1717309147392" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/deployment_stage" />
     <SUITE FILE_PATH="coverage/iclr2024_TAO$data_read.coverage" NAME="data_read Coverage Results" MODIFIED="1717246661085" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/envs/multiagent_particle_envs/data" />
-    <SUITE FILE_PATH="coverage/iclr2024_TAO$hmy_test.coverage" NAME="hmy_test Coverage Results" MODIFIED="1717504914360" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/deployment_stage" />
+    <SUITE FILE_PATH="coverage/iclr2024_TAO$t_SNE.coverage" NAME="t-SNE Coverage Results" MODIFIED="1717742600029" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/deployment_stage" />
+    <SUITE FILE_PATH="coverage/iclr2024_TAO$hmy_test.coverage" NAME="hmy_test Coverage Results" MODIFIED="1717742544070" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/deployment_stage" />
     <SUITE FILE_PATH="coverage/iclr2024_TAO$lab1.coverage" NAME="lab1 Coverage Results" MODIFIED="1715001316312" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/../../../研究生课/研一下/优化/23s103245何明研  实验1" />
   </component>
 </project>

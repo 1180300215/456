@@ -226,22 +226,7 @@ def collect_episodes(encoder, decoder, env_and_test_oppo, num_test, switch_inter
     return oppo_context_window
 
 
-
-# def load_all_data(offline_data, online_data, config_dict):
-#     obs_dim = config_dict["OBS_DIM"]
-#     act_dim = config_dict["ACT_DIM"]
-#     num_offline_oppo_policy = len(offline_data)
-#     num_online_oppo_policy = len(online_data)
-#     if config_dict["OBS_NORMALIZE"]:
-#         obs_offline_mean_list = config_dict["offline_OBS_MEAN"]
-#         obs_offline_std_list = config_dict["offline_OBS_STD"]
-#         obs_online_mean_list = config_dict["online_OBS_MEAN"]
-#         obs_online_std_list = config_dict["online_OBS_STD"]
-
-
-
-
-def load_online_data(online_data, config_dict):
+def evaluation_online_data(online_data, config_dict):
     obs_dim = config_dict["OBS_DIM"]
     act_dim = config_dict["ACT_DIM"]
     K = config_dict["NUM_STEPS"]  # 最大值 每个episode
@@ -286,7 +271,7 @@ def load_online_data(online_data, config_dict):
 def evaluation(encoder, all_data,config):
     # print("niubi")
     avg_pooling = nn.AvgPool1d(kernel_size=config["NUM_STEPS"])
-    batch = all_data
+    batch = all_data()
     n_o, a, r, timesteps, mask = batch
     hidden_states = encoder(
         obs=n_o,
@@ -298,7 +283,16 @@ def evaluation(encoder, all_data,config):
 
     hidden_states = avg_pooling(hidden_states.permute([0, 2, 1])).squeeze(-1)
 
-    print(hidden_states)
+    print(hidden_states)    # 其形状为([100,32])
+    hidden_mean = hidden_states.mean(dim=0)
+    hidden_std = hidden_states.std(dim=0)
+
+    print("当前环境下均值为：")
+    print(hidden_mean)
+    print("当前环境下方差为：")
+    print(hidden_std)
+
+
 
 
 def load_online_data(oppo_context_w):

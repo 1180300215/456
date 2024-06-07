@@ -11,8 +11,8 @@ from offline_stage_1.utils import (
     CrossEntropy,
     LOG,
 )
-from offline_stage_2.utils import (
-    load_online_data,
+from deployment_stage.utils import (
+    evaluation_online_data,
     evaluation,
 )
 import torch
@@ -99,7 +99,7 @@ def main():
     encoder.load_model("../offline_stage_2/model/PA-pretrained_models/res_encoder_iter_1999", device=device)
     encoder.eval()
 
-    all_online_data = load_online_data(online_data,CONFIG_DICT)
+    all_online_data = evaluation_online_data(online_data,CONFIG_DICT)
 
     evaluation(
         encoder=encoder,
