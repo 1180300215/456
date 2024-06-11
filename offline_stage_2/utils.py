@@ -711,3 +711,196 @@ def online_episode_get_window(
     average_epi_return = np.mean([episode_return[k] for k in agent_index])
 
     return average_epi_return, oppo_context_window
+
+
+def evaluating_online_rtg(
+        env,
+        env_type,
+        agent_obs_dim,
+        oppo_obs_dim,
+        act_dim,
+        c_dim,
+        encoder,
+        decoder,
+        oppo_policy,
+        agent_index,
+        oppo_index,
+        num_steps=100,
+        reward_scale=1000.,
+        target_rtg=None,
+        eval_mode='normal',
+        agent_obs_mean=0.,
+        agent_obs_std=1.,
+        oppo_obs_mean=0.,
+        oppo_obs_std=1.,
+        oppo_context_window=None,
+        device="cuda",
+        obs_normalize=True,
+):
+    encoder.eval()
+    encoder.to(device=device)
+    K = encoder.K
+    decoder.eval()
+    decoder.to(device=device)
+
+    agent_obs_mean = torch.from_numpy(agent_obs_mean).to(device=device)
+    agent_obs_std = torch.from_numpy(agent_obs_std).to(device=device)
+    oppo_obs_mean = torch.from_numpy(oppo_obs_mean).to(device=device)
+    oppo_obs_std = torch.from_numpy(oppo_obs_std).to(device=device)
+
+    if env_type == 'MS':
+        time_step = env.reset()
+        _, _, rel_state1, rel_state2 = get_two_state(time_step)
+        obs_n = [rel_state1, rel_state2]
+    else:
+        obs_n = env.reset()
+    if eval_mode == 'noise':
+        for i in agent_index:
+            obs_n[i] = obs_n[i] + np.random.normal(0, 0.1, size=obs_n[i].shape)
+
+    if oppo_context_window != None:
+        oppo_embeds, oppo_mask = [], []
+        for oppo_trajs in oppo_context_window:
+            n_o_oppo, a_oppo, r_oppo, _, _, timestep_oppo = oppo_trajs
+            es = np.random.randint(0, n_o_oppo.shape[0])  # 返回一个随机整数
+            oppo_embeds_, oppo_mask_ = encoder.get_tokens(
+                n_o_oppo[es:es + K].to(device=device, dtype=torch.float32),
+                a_oppo[es:es + K].to(device=device, dtype=torch.float32),
+                r_oppo[es:es + K].to(device=device, dtype=torch.float32),
+                timestep_oppo[es:es + K].to(device=device, dtype=torch.long),
+                attention_mask=None,
+            )
+            oppo_embeds.append(oppo_embeds_)
+            oppo_mask.append(oppo_mask_)
+        oppo_embeds = torch.cat(oppo_embeds, dim=1).contiguous()
+        oppo_mask = torch.cat(oppo_mask, dim=1).contiguous()
+    else:
+        oppo_embeds, oppo_mask = None, None
+
+    # we keep all the histories on the device
+    # note that the latest action and reward will be "padding"
+    obs_list_n = [None for _ in oppo_index + agent_index]
+    act_list_n = [None for _ in oppo_index + agent_index]
+    r_list_n = [None for _ in oppo_index + agent_index]
+    target_rtg_list_n = [None for _ in oppo_index + agent_index]
+    timestep_list_n = [None for _ in oppo_index + agent_index]
+    for i in oppo_index + agent_index:
+        obs_list_n[i] = torch.from_numpy(obs_n[i]).reshape(1, agent_obs_dim if i in agent_index else oppo_obs_dim).to(
+            device=device, dtype=torch.float32)
+        act_list_n[i] = torch.zeros((0, act_dim), device=device, dtype=torch.float32)
+        r_list_n[i] = torch.zeros(0, device=device, dtype=torch.float32)
+        ep_return = target_rtg
+        target_rtg_list_n[i] = torch.tensor(ep_return, device=device, dtype=torch.float32).reshape(1, 1)
+        timestep_list_n[i] = torch.tensor(0, device=device, dtype=torch.long).reshape(1, 1)
+
+    episode_return = [0. for _ in oppo_index + agent_index]
+    true_steps = 0
+    for t in range(num_steps):
+        act_n = [None for _ in oppo_index + agent_index]
+        for i in agent_index:
+            # add padding
+            act_list_n[i] = torch.cat([act_list_n[i], torch.zeros((1, act_dim), device=device)], dim=0)
+            r_list_n[i] = torch.cat([r_list_n[i], torch.zeros(1, device=device)])
+            if obs_normalize:
+                action = decoder.get_action(
+                    (obs_list_n[i].to(dtype=torch.float32) - agent_obs_mean) / agent_obs_std,
+                    act_list_n[i].to(dtype=torch.float32),
+                    r_list_n[i].to(dtype=torch.float32),
+                    target_rtg_list_n[i].to(dtype=torch.float32),
+                    timestep_list_n[i].to(dtype=torch.long),
+                    oppo_embeds,
+                    oppo_mask,
+                )
+            else:
+                action = decoder.get_action(
+                    obs_list_n[i].to(dtype=torch.float32),
+                    act_list_n[i].to(dtype=torch.float32),
+                    r_list_n[i].to(dtype=torch.float32),
+                    target_rtg_list_n[i].to(dtype=torch.float32),
+                    timestep_list_n[i].to(dtype=torch.long),
+                    oppo_embeds,
+                    oppo_mask,
+                )
+            if env_type == "PA":
+                action = torch.nn.Softmax(dim=0)(action)
+                action_index = torch.argmax(action)
+                print(action_index)  # 新增两处修改
+                action = torch.eye(act_dim, dtype=torch.float32)[action_index]
+                print(action)  # 新增两处修改
+                act = action.detach().clone().cpu().numpy()
+                act = np.concatenate([act, np.zeros(c_dim)])
+            elif env_type == 'MS':
+                action_prob = torch.nn.Softmax(dim=0)(action)
+                dist = Categorical(action_prob)
+                act = dist.sample().detach().clone().cpu().numpy()
+                action = torch.eye(act_dim, dtype=torch.float32)[act]
+            act_n[i] = act
+            act_list_n[i][-1] = action
+
+        for j in oppo_index:
+            act_list_n[j] = torch.cat([act_list_n[j], torch.zeros((1, act_dim), device=device)], dim=0)
+            r_list_n[j] = torch.cat([r_list_n[j], torch.zeros(1, device=device)])
+            if env_type == "PA":
+                action = act = oppo_policy.action(obs_n[j])
+            elif env_type == 'MS':
+                action_prob = oppo_policy(torch.tensor(obs_n[j], dtype=torch.float32, device=device))
+                dist = Categorical(action_prob)
+                act = dist.sample().detach().clone().cpu().numpy()
+                action = np.eye(act_dim, dtype=np.float32)[act]
+            act_n[j] = act
+            cur_action = torch.from_numpy(action[:act_dim]).to(device=device, dtype=torch.float32).reshape(1, act_dim)
+            act_list_n[j][-1] = cur_action
+
+        if env_type == 'MS':
+            act_n = np.array(act_n)
+            time_step = env.step(act_n)
+            rew1, rew2 = time_step.rewards[0], time_step.rewards[1]
+            reward_n = [rew1, rew2]
+            _, _, rel_state1_, rel_state2_ = get_two_state(time_step)
+            obs_n = [rel_state1_, rel_state2_]
+            done_ = (time_step.last() == True)
+            done_n = [done_, done_]
+            info_n = {}
+        else:
+            obs_n, reward_n, done_n, info_n = env.step(act_n)
+
+        for i in oppo_index + agent_index:
+            cur_obs = torch.from_numpy(obs_n[i]).to(device=device, dtype=torch.float32).reshape(1,
+                                                                                                agent_obs_dim if i in agent_index else oppo_obs_dim)
+            obs_list_n[i] = torch.cat([obs_list_n[i], cur_obs], dim=0)
+            r_list_n[i][-1] = reward_n[i]
+
+            if eval_mode != 'delayed':
+                pred_return = target_rtg_list_n[i][0, -1] - (reward_n[i] / reward_scale)
+            else:
+                pred_return = target_rtg_list_n[i][0, -1]
+            target_rtg_list_n[i] = torch.cat(
+                [target_rtg_list_n[i], pred_return.reshape(1, 1)], dim=1)
+            timestep_list_n[i] = torch.cat(
+                [timestep_list_n[i],
+                 torch.ones((1, 1), device=device, dtype=torch.long) * (t + 1)], dim=1)
+            episode_return[i] += reward_n[i]
+        true_steps += 1
+        if done_n[0] or done_n[1]:
+            break
+
+    for j in oppo_index:
+        if obs_normalize:
+            n_o_oppo = (obs_list_n[j] - oppo_obs_mean) / oppo_obs_std
+        else:
+            n_o_oppo = obs_list_n[j]
+        a_oppo = act_list_n[j]
+        r_oppo = r_list_n[j]
+        timestep_oppo = timestep_list_n[j]
+    steps_ = min(num_steps, true_steps)
+    if oppo_context_window == None:
+        oppo_context_window = [(n_o_oppo[1:1 + steps_, :], a_oppo[:steps_, :], r_oppo[:steps_], n_o_oppo[:steps_, :],
+                                timestep_oppo[0, :steps_], timestep_oppo[0, 1:steps_ + 1])]
+    else:
+        oppo_context_window.append((
+                                   n_o_oppo[1:1 + steps_, :], a_oppo[:steps_, :], r_oppo[:steps_], n_o_oppo[:steps_, :],
+                                   timestep_oppo[0, :steps_], timestep_oppo[0, 1:steps_ + 1]))
+
+    average_epi_return = np.mean([episode_return[k] for k in agent_index])
+
+    return average_epi_return, oppo_context_window

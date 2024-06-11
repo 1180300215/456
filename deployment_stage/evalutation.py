@@ -18,7 +18,8 @@ from deployment_stage.utils import (
 import torch
 import numpy as np
 import wandb
-from deployment_stage.collect_data import collect_data
+import pickle
+# from deployment_stage.collect_data import collect_data
 if Config.RUN_OFFLINE:
     os.environ["WANDB_MODE"] = "offline"
 
@@ -63,7 +64,9 @@ def main():
         obs_offline_mean_list, obs_offline_std_list = cal_obs_mean(offline_data, total=average_total_obs)
         CONFIG_DICT["offline_OBS_MEAN"] = obs_offline_mean_list
         CONFIG_DICT["offline_OBS_STD"] = obs_offline_std_list
-    online_data = collect_data()
+
+    with open('all_online_data.pkl', 'rb') as f:
+        online_data = pickle.load(f)
     LOG.info("Finish loading online dataset.")
     if obs_normalize:
         obs_online_mean_list, obs_online_std_list = cal_obs_mean(online_data, total=average_total_obs)
@@ -96,6 +99,7 @@ def main():
     )
 
     encoder = encoder.to(device=device)
+    # encoder.load_model("./model/PA-unseen-3oppo-ours-a1-l1-W5-K20-20240604055015/pel_encoder_iter_499", device=device)
     encoder.load_model("../offline_stage_2/model/PA-pretrained_models/res_encoder_iter_1999", device=device)
     encoder.eval()
 
