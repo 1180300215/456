@@ -99,7 +99,6 @@ def main():
     )
 
     encoder = encoder.to(device=device)
-    # encoder.load_model("./model/PA-unseen-3oppo-ours-a1-l1-W5-K20-20240604055015/pel_encoder_iter_499", device=device)
     encoder.load_model("../offline_stage_2/model/PA-pretrained_models/res_encoder_iter_1999", device=device)
     encoder.eval()
 

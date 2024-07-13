@@ -9,6 +9,7 @@ from offline_stage_1.utils import (
     get_batch_mix,
     load_oppo_data,
     cal_obs_mean,
+    get_batch_mix_offline,
     CrossEntropy,
     LOG,
 )
@@ -100,7 +101,7 @@ def main():
     )
 
     encoder = encoder.to(device=device)
-    encoder.load_model("../offline_stage_2/model/PA-pretrained_models/res_encoder_iter_1999", device=device)
+    # encoder.load_model("../offline_stage_2/model/MS-pretrained_models/res_encoder_iter_1999", device=device)
     encoder_optimizer = torch.optim.AdamW(
         encoder.parameters(),
         lr=learning_rate,
@@ -116,7 +117,8 @@ def main():
         batch_size=batch_size,
         encoder_optimizer=encoder_optimizer,
         encoder_scheduler=encoder_scheduler,
-        get_batch_fn=get_batch_mix(offline_data, online_data, CONFIG_DICT),
+        # get_batch_fn=get_batch_mix(offline_data, online_data, CONFIG_DICT),
+        get_batch_fn=get_batch_mix_offline(offline_data, online_data, CONFIG_DICT),
         loss_gen_fn=CrossEntropy,
         config=CONFIG_DICT,
     )

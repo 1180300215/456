@@ -169,13 +169,13 @@ if __name__ == '__main__':
     # parser.add_argument("--project_name", type=str, default="TEST-MS")
     # * remember to change ENV_TYPE in '../offline_stage_2/config.py' file to PA when testing on PA
     parser.add_argument("--project_name", type=str, default="TEST-PA")
-    parser.add_argument("--num_test", type=int, default=50)
-    parser.add_argument("--switch_interval", type=int, default=50)
+    parser.add_argument("--num_test", type=int, default=1)
+    parser.add_argument("--switch_interval", type=int, default=1)
     parser.add_argument("--test_mode", type=str, default="unseen", choices=["seen", "unseen", "mix"])
     args = parser.parse_args()
 
     if "MS" in args.project_name:  # * MS
-        args.encoder_param_path = '../offline_stage_2/model/MS-pretrained_models/res_encoder_iter_1999'
+        args.encoder_param_path = '../offline_stage_2/model/MS-pretrained_models/res_encoder_iter_1999'git
         args.decoder_param_path = '../offline_stage_2/model/MS-pretrained_models/res_decoder_iter_1999'
     elif "PA" in args.project_name:  # * PA
         args.encoder_param_path = '../offline_stage_2/model/PA-pretrained_models/res_encoder_iter_1999'

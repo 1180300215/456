@@ -7,10 +7,10 @@ class Config:
     PROJECT_NAME = 'PEL-MS'
     
     # ENV_TYPE = "PA"
-    ENV_TYPE = "PA"
-    # USE_ONLINE = "FALSE"
+    ENV_TYPE = "MS"
+    
     # ---------- NOTE: environment settings ----------
-    if ENV_TYPE == "PA":  # * PA    
+    if ENV_TYPE == "PA":  # * PA
         OBS_DIM = 8  # opponent obs_dim
         ACT_DIM = 5
         NUM_STEPS = 100
@@ -31,7 +31,7 @@ class Config:
     # ---------- NOTE: policy embedding learning ----------
     SEED_PEL = 0
     EXP_ID = 'a1-l1'
-    DEVICE = 'cuda:0'
+    DEVICE = 'cuda:1'
     
     if ENV_TYPE == "PA":  # * PA
         NUM_ITER = 500

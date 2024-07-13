@@ -3,6 +3,7 @@ import pickle, torch
 from torch.distributions import Categorical
 import logging
 import os, sys
+import random
 sys.path.insert(1, os.path.join(sys.path[0], '..'))
 import envs.multiagent_particle_envs.multiagent.scenarios as scenarios
 from envs.multiagent_particle_envs.multiagent.environment import MultiAgentEnv
@@ -104,6 +105,7 @@ def eval_episode_rtg(
         oppo_mask = torch.cat(oppo_mask, dim=1).contiguous()
     else:
         oppo_embeds, oppo_mask = None, None
+
 
     # we keep all the histories on the device
     # note that the latest action and reward will be "padding"
@@ -536,6 +538,7 @@ def online_episode_get_window(
         oppo_obs_mean=0.,
         oppo_obs_std=1.,
         oppo_context_window=None,
+        oppo_part_context_window=None,
         device="cuda",
         obs_normalize=True,
 ):
@@ -571,7 +574,7 @@ def online_episode_get_window(
                 r_oppo[es:es + K].to(device=device, dtype=torch.float32),
                 timestep_oppo[es:es + K].to(device=device, dtype=torch.long),
                 attention_mask=None,
-            )    # 连续对手20个片段观察动作回报时间步
+            )
             oppo_embeds.append(oppo_embeds_)
             oppo_mask.append(oppo_mask_)
         oppo_embeds = torch.cat(oppo_embeds, dim=1).contiguous()
@@ -594,7 +597,7 @@ def online_episode_get_window(
         ep_return = target_rtg
         target_rtg_list_n[i] = torch.tensor(ep_return, device=device, dtype=torch.float32).reshape(1, 1)
         timestep_list_n[i] = torch.tensor(0, device=device, dtype=torch.long).reshape(1, 1)
-# 对所有的o a r rtg timestep 初始化操作
+
     episode_return = [0. for _ in oppo_index + agent_index]
     true_steps = 0
     for t in range(num_steps):
@@ -663,9 +666,10 @@ def online_episode_get_window(
             info_n = {}
         else:
             obs_n, reward_n, done_n, info_n = env.step(act_n)
-# 得到的实际的 o r done
+
         for i in oppo_index + agent_index:
-            cur_obs = torch.from_numpy(obs_n[i]).to(device=device, dtype=torch.float32).reshape(1,agent_obs_dim if i in agent_index else oppo_obs_dim)
+            cur_obs = torch.from_numpy(obs_n[i]).to(device=device, dtype=torch.float32).reshape(1,
+                                                                                                agent_obs_dim if i in agent_index else oppo_obs_dim)
             obs_list_n[i] = torch.cat([obs_list_n[i], cur_obs], dim=0)
             r_list_n[i][-1] = reward_n[i]
 
@@ -691,15 +695,6 @@ def online_episode_get_window(
         a_oppo = act_list_n[j]
         r_oppo = r_list_n[j]
         timestep_oppo = timestep_list_n[j]
-    # for i in agent_index:
-    #     if obs_normalize:
-    #         n_o_agent = (obs_list_n[i] - agent_obs_mean) / agent_obs_std
-    #     else:
-    #         n_o_agent = obs_list_n[i]
-    #     a_agent = act_list_n[i]
-    #     r_agent = r_list_n[i]
-    #     timestep_agent = timestep_list_n[i]
-
     steps_ = min(num_steps, true_steps)
     if oppo_context_window == None:
         oppo_context_window = [(n_o_oppo[1:1 + steps_, :], a_oppo[:steps_, :], r_oppo[:steps_], n_o_oppo[:steps_, :],
@@ -821,12 +816,11 @@ def evaluating_online_rtg(
                     oppo_embeds,
                     oppo_mask,
                 )
+            print(action)
             if env_type == "PA":
                 action = torch.nn.Softmax(dim=0)(action)
                 action_index = torch.argmax(action)
-                print(action_index)  # 新增两处修改
                 action = torch.eye(act_dim, dtype=torch.float32)[action_index]
-                print(action)  # 新增两处修改
                 act = action.detach().clone().cpu().numpy()
                 act = np.concatenate([act, np.zeros(c_dim)])
             elif env_type == 'MS':
@@ -904,3 +898,1463 @@ def evaluating_online_rtg(
     average_epi_return = np.mean([episode_return[k] for k in agent_index])
 
     return average_epi_return, oppo_context_window
+
+
+def online_get_oppo_agent_window(
+        env,
+        env_type,
+        agent_obs_dim,
+        oppo_obs_dim,
+        act_dim,
+        c_dim,
+        encoder,
+        decoder,
+        oppo_policy,
+        agent_index,
+        oppo_index,
+        num_steps=100,
+        reward_scale=1000.,
+        target_rtg=None,
+        eval_mode='normal',
+        agent_obs_mean=0.,
+        agent_obs_std=1.,
+        oppo_obs_mean=0.,
+        oppo_obs_std=1.,
+        all_context_window=None,
+        part_context_window=None,
+        device="cuda",
+        obs_normalize=True,
+):
+    encoder.eval()
+    encoder.to(device=device)
+    K = encoder.K
+    decoder.eval()
+    decoder.to(device=device)
+
+    agent_obs_mean = torch.from_numpy(agent_obs_mean).to(device=device)
+    agent_obs_std = torch.from_numpy(agent_obs_std).to(device=device)
+    oppo_obs_mean = torch.from_numpy(oppo_obs_mean).to(device=device)
+    oppo_obs_std = torch.from_numpy(oppo_obs_std).to(device=device)
+
+    if env_type == 'MS':
+        time_step = env.reset()
+        _, _, rel_state1, rel_state2 = get_two_state(time_step)
+        obs_n = [rel_state1, rel_state2]
+    else:
+        obs_n = env.reset()
+    if eval_mode == 'noise':
+        for i in agent_index:
+            obs_n[i] = obs_n[i] + np.random.normal(0, 0.1, size=obs_n[i].shape)
+
+
+    if all_context_window != None:
+        oppo_embeds, oppo_mask = [], []
+        for all_trajs in all_context_window:
+            _, _, _, _, _, _, n_o_oppo, a_oppo, r_oppo, _, _, timestep_oppo = all_trajs
+            es = np.random.randint(0, n_o_oppo.shape[0])  # 返回一个随机整数
+            oppo_embeds_, oppo_mask_ = encoder.get_tokens(
+                n_o_oppo[es:es + K].to(device=device, dtype=torch.float32),
+                a_oppo[es:es + K].to(device=device, dtype=torch.float32),
+                r_oppo[es:es + K].to(device=device, dtype=torch.float32),
+                timestep_oppo[es:es + K].to(device=device, dtype=torch.long),
+                attention_mask=None,
+            )
+            oppo_embeds.append(oppo_embeds_)
+            oppo_mask.append(oppo_mask_)
+        oppo_embeds = torch.cat(oppo_embeds, dim=1).contiguous()
+        oppo_mask = torch.cat(oppo_mask, dim=1).contiguous()
+    else:
+        oppo_embeds, oppo_mask = None, None
+
+    # we keep all the histories on the device
+    # note that the latest action and reward will be "padding"
+    obs_list_n = [None for _ in oppo_index + agent_index]
+    act_list_n = [None for _ in oppo_index + agent_index]
+    r_list_n = [None for _ in oppo_index + agent_index]
+    target_rtg_list_n = [None for _ in oppo_index + agent_index]
+    timestep_list_n = [None for _ in oppo_index + agent_index]
+    for i in oppo_index + agent_index:
+        obs_list_n[i] = torch.from_numpy(obs_n[i]).reshape(1, agent_obs_dim if i in agent_index else oppo_obs_dim).to(
+            device=device, dtype=torch.float32)
+        act_list_n[i] = torch.zeros((0, act_dim), device=device, dtype=torch.float32)
+        r_list_n[i] = torch.zeros(0, device=device, dtype=torch.float32)
+        ep_return = target_rtg
+        target_rtg_list_n[i] = torch.tensor(ep_return, device=device, dtype=torch.float32).reshape(1, 1)
+        timestep_list_n[i] = torch.tensor(0, device=device, dtype=torch.long).reshape(1, 1)
+# 对所有的o a r rtg timestep 初始化操作
+    episode_return = [0. for _ in oppo_index + agent_index]
+    true_steps = 0
+    for t in range(num_steps):
+        act_n = [None for _ in oppo_index + agent_index]
+        for i in agent_index:
+            # add padding
+            act_list_n[i] = torch.cat([act_list_n[i], torch.zeros((1, act_dim), device=device)], dim=0)
+            r_list_n[i] = torch.cat([r_list_n[i], torch.zeros(1, device=device)])
+            if obs_normalize:
+                action = decoder.get_action(
+                    (obs_list_n[i].to(dtype=torch.float32) - agent_obs_mean) / agent_obs_std,
+                    act_list_n[i].to(dtype=torch.float32),
+                    r_list_n[i].to(dtype=torch.float32),
+                    target_rtg_list_n[i].to(dtype=torch.float32),
+                    timestep_list_n[i].to(dtype=torch.long),
+                    oppo_embeds,
+                    oppo_mask,
+                )
+            else:
+                action = decoder.get_action(
+                    obs_list_n[i].to(dtype=torch.float32),
+                    act_list_n[i].to(dtype=torch.float32),
+                    r_list_n[i].to(dtype=torch.float32),
+                    target_rtg_list_n[i].to(dtype=torch.float32),
+                    timestep_list_n[i].to(dtype=torch.long),
+                    oppo_embeds,
+                    oppo_mask,
+                )
+            if env_type == "PA":
+                action = torch.nn.Softmax(dim=0)(action)
+                action_index = torch.argmax(action)
+                action = torch.eye(act_dim, dtype=torch.float32)[action_index]
+                act = action.detach().clone().cpu().numpy()
+                act = np.concatenate([act, np.zeros(c_dim)])
+            elif env_type == 'MS':
+                action_prob = torch.nn.Softmax(dim=0)(action)
+                dist = Categorical(action_prob)
+                act = dist.sample().detach().clone().cpu().numpy()
+                action = torch.eye(act_dim, dtype=torch.float32)[act]
+            act_n[i] = act
+            act_list_n[i][-1] = action
+
+        for j in oppo_index:
+            act_list_n[j] = torch.cat([act_list_n[j], torch.zeros((1, act_dim), device=device)], dim=0)
+            r_list_n[j] = torch.cat([r_list_n[j], torch.zeros(1, device=device)])
+            if env_type == "PA":
+                action = act = oppo_policy.action(obs_n[j])
+            elif env_type == 'MS':
+                action_prob = oppo_policy(torch.tensor(obs_n[j], dtype=torch.float32, device=device))
+                dist = Categorical(action_prob)
+                act = dist.sample().detach().clone().cpu().numpy()
+                action = np.eye(act_dim, dtype=np.float32)[act]
+            act_n[j] = act
+            cur_action = torch.from_numpy(action[:act_dim]).to(device=device, dtype=torch.float32).reshape(1, act_dim)
+            act_list_n[j][-1] = cur_action
+
+        if env_type == 'MS':
+            act_n = np.array(act_n)
+            time_step = env.step(act_n)
+            rew1, rew2 = time_step.rewards[0], time_step.rewards[1]
+            reward_n = [rew1, rew2]
+            _, _, rel_state1_, rel_state2_ = get_two_state(time_step)
+            obs_n = [rel_state1_, rel_state2_]
+            done_ = (time_step.last() == True)
+            done_n = [done_, done_]
+            info_n = {}
+        else:
+            obs_n, reward_n, done_n, info_n = env.step(act_n)
+# 得到的实际的 o r done
+        for i in oppo_index + agent_index:
+            cur_obs = torch.from_numpy(obs_n[i]).to(device=device, dtype=torch.float32).reshape(1,agent_obs_dim if i in agent_index else oppo_obs_dim)
+            obs_list_n[i] = torch.cat([obs_list_n[i], cur_obs], dim=0)
+            r_list_n[i][-1] = reward_n[i]
+
+            if eval_mode != 'delayed':
+                pred_return = target_rtg_list_n[i][0, -1] - (reward_n[i] / reward_scale)
+            else:
+                pred_return = target_rtg_list_n[i][0, -1]
+            target_rtg_list_n[i] = torch.cat(
+                [target_rtg_list_n[i], pred_return.reshape(1, 1)], dim=1)
+            timestep_list_n[i] = torch.cat(
+                [timestep_list_n[i],
+                 torch.ones((1, 1), device=device, dtype=torch.long) * (t + 1)], dim=1)
+            episode_return[i] += reward_n[i]
+        true_steps += 1
+        if done_n[0] or done_n[1]:
+            break
+    
+    steps_ = min(num_steps, true_steps)
+
+    for i in agent_index:
+        if obs_normalize:
+            n_o_agent = (obs_list_n[i] - agent_obs_mean) / agent_obs_std
+        else:
+            n_o_agent = obs_list_n[i]
+        a_agent = act_list_n[i]
+        r_agent = r_list_n[i]
+        timestep_agent = timestep_list_n[i]
+
+        for j in oppo_index:
+            if obs_normalize:
+                n_o_oppo = (obs_list_n[j] - oppo_obs_mean) / oppo_obs_std
+            else:
+                n_o_oppo = obs_list_n[j]
+            a_oppo = act_list_n[j]
+            r_oppo = r_list_n[j]
+            timestep_oppo = timestep_list_n[j]
+        
+        if all_context_window == None:
+            all_context_window = [(n_o_agent[1:1 + steps_, :],a_agent[:steps_, :],r_agent[:steps_],n_o_agent[:steps_, :],
+                                timestep_agent[0, :steps_],timestep_agent[0, 1:steps_ + 1],
+                                n_o_oppo[1:1 + steps_, :], a_oppo[:steps_, :], r_oppo[:steps_], n_o_oppo[:steps_, :],
+                                timestep_oppo[0, :steps_], timestep_oppo[0, 1:steps_ + 1])]
+        else:
+            all_context_window.append((n_o_agent[1:1 + steps_, :],a_agent[:steps_, :],r_agent[:steps_],n_o_agent[:steps_, :],
+                                timestep_agent[0, :steps_],timestep_agent[0, 1:steps_ + 1],
+                                n_o_oppo[1:1 + steps_, :], a_oppo[:steps_, :], r_oppo[:steps_], n_o_oppo[:steps_, :],
+                                timestep_oppo[0, :steps_], timestep_oppo[0, 1:steps_ + 1]))
+    
+    
+    average_epi_return = np.mean([episode_return[k] for k in agent_index])
+
+    return average_epi_return, all_context_window
+
+
+def get_batch_mix(offline_data, online_data, config_dict):
+    agent_obs_dim = config_dict["AGENT_OBS_DIM"]
+    oppo_obs_dim = config_dict["OPPO_OBS_DIM"]
+    act_dim = config_dict["ACT_DIM"]
+    num_offline_oppo_policy = len(offline_data)
+    num_online_oppo_policy = len(online_data)
+    offline_num_trajs_list = config_dict["NUM_TRAJS"]
+    online_num_trajs_list = [len(online_data[0])]
+    batch_size = config_dict["BATCH_SIZE"]
+    K_encoder = config_dict["K"]
+    K_decoder = config_dict["K"]
+    num_steps = config_dict["NUM_STEPS"]
+    if config_dict["OBS_NORMALIZE"]:
+        offline_agent_obs_mean_list = config_dict["OFFLINE_AGENT_OBS_MEAN"]
+        offline_agent_obs_std_list = config_dict["OFFLINE_AGENT_OBS_STD"]
+        offline_oppo_obs_mean_list = config_dict["OFFLINE_OPPO_OBS_MEAN"]
+        offline_oppo_obs_std_list = config_dict["OFFLINE_OPPO_OBS_STD"]
+        online_agent_obs_mean_list = config_dict["ONLINE_AGENT_OBS_MEAN"]
+        online_agent_obs_std_list = config_dict["ONLINE_AGENT_OBS_STD"]
+        online_oppo_obs_mean_list = config_dict["ONLINE_OPPO_OBS_MEAN"]
+        online_oppo_obs_std_list = config_dict["ONLINE_OPPO_OBS_STD"]
+    reward_scale = config_dict["REWARD_SCALE"]
+    device = config_dict["DEVICE"]
+    ocw_size = config_dict["OCW_SIZE"]   # 5
+    def fn(batch_size=batch_size, max_len_e=K_encoder, max_len_d=K_decoder):
+        n_o_e, a_e, r_e, timesteps_e, mask_e = [], [], [], [], []
+        o_d, a_d, r_d, rtg_d, timesteps_d, mask_d = [], [], [], [], [], []
+        o_e_d, a_e_d = [], []
+        for i in range(num_offline_oppo_policy):
+            batch_inds = np.random.choice(
+                np.arange(offline_num_trajs_list[i]),
+                size=batch_size,
+                replace=False,
+            )    # 得到索引
+            for k in range(batch_size):
+                traj = offline_data[i][batch_inds[k]]
+                ds = np.random.randint(0, traj[0]['rewards'].shape[0])
+                o_d.append(traj[0]['observations'][ds:ds + max_len_d].reshape(1, -1, agent_obs_dim))
+                a_d.append(traj[0]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                r_d.append(traj[0]['rewards'][ds:ds + max_len_d].reshape(1, -1, 1))
+                timesteps_d.append(np.arange(ds, ds + o_d[-1].shape[1]).reshape(1, -1))
+                timesteps_d[-1][timesteps_d[-1] >= num_steps] = num_steps - 1  # padding cutoff
+                rtg_d.append(discount_cumsum(traj[0]['rewards'][ds:], gamma=1.)[:o_d[-1].shape[1] + 1].reshape(1, -1, 1))
+                if rtg_d[-1].shape[1] <= o_d[-1].shape[1]:
+                    rtg_d[-1] = np.concatenate([rtg_d[-1], np.zeros((1, 1, 1))], axis=1)
+                
+                tlen_d = o_d[-1].shape[1]
+                
+                o_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, agent_obs_dim)), o_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_d[-1] = (o_d[-1] - offline_agent_obs_mean_list[i]) / offline_agent_obs_std_list[i]
+                a_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_d[-1]], axis=1)
+                r_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), r_d[-1]], axis=1)
+                rtg_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), rtg_d[-1]], axis=1) / reward_scale
+                timesteps_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d)), timesteps_d[-1]], axis=1)
+                mask_d.append(np.concatenate([np.zeros((1, max_len_d - tlen_d)), np.ones((1, tlen_d))], axis=1))
+                
+                o_e_d.append(traj[1]['observations'][ds:ds + max_len_d].reshape(1, -1, oppo_obs_dim))
+                a_e_d.append(traj[1]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                
+                o_e_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, oppo_obs_dim)), o_e_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_e_d[-1] = (o_e_d[-1] - offline_oppo_obs_mean_list[i]) / offline_oppo_obs_std_list[i]
+                a_e_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_e_d[-1]], axis=1)
+                
+                oppo_batch_inds = np.random.choice(
+                    np.arange(offline_num_trajs_list[i]),
+                    size=ocw_size,
+                    replace=False,
+                )
+                n_o_e_, a_e_, r_e_, timesteps_e_, mask_e_ = [], [], [], [], []
+                for j in range(ocw_size):
+                    oppo_traj = offline_data[i][oppo_batch_inds[j]]
+                    es = np.random.randint(0, oppo_traj[1]['rewards'].shape[0])
+                    n_o_e_.append(oppo_traj[1]['next_observations'][es:es+max_len_e].reshape(1, -1, oppo_obs_dim))
+                    a_e_.append(oppo_traj[1]['actions'][es:es+max_len_e].reshape(1, -1, act_dim))
+                    r_e_.append(oppo_traj[1]['rewards'][es:es+max_len_e].reshape(1, -1, 1))
+                    timesteps_e_.append(np.arange((es+1), (es+1+n_o_e_[-1].shape[1])).reshape(1, -1))
+                    timesteps_e_[-1][timesteps_e_[-1] >= (num_steps+1)] = num_steps
+                    
+                    tlen_e = n_o_e_[-1].shape[1]
+                    
+                    n_o_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, oppo_obs_dim)), n_o_e_[-1]], axis=1)
+                    if config_dict["OBS_NORMALIZE"]:
+                        n_o_e_[-1] = (n_o_e_[-1] - offline_oppo_obs_mean_list[i]) / offline_oppo_obs_std_list[i]
+                    a_e_[-1] = np.concatenate([np.ones((1, max_len_e - tlen_e, act_dim)) * -10., a_e_[-1]], axis=1)
+                    r_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, 1)), r_e_[-1]], axis=1)
+                    timesteps_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e)), timesteps_e_[-1]], axis=1)
+                    mask_e_.append(np.concatenate([np.zeros((1, max_len_e - tlen_e)), np.ones((1, tlen_e))], axis=1))
+                n_o_e.append(np.concatenate(n_o_e_, axis=1))
+                a_e.append(np.concatenate(a_e_, axis=1))
+                r_e.append(np.concatenate(r_e_, axis=1))
+                timesteps_e.append(np.concatenate(timesteps_e_, axis=1))
+                mask_e.append(np.concatenate(mask_e_, axis=1))
+        for i in range(num_online_oppo_policy):
+            batch_inds = np.random.choice(
+                np.arange(online_num_trajs_list[i]),
+                size=batch_size,
+                replace=False,
+            )    # 得到索引
+            for k in range(batch_size):
+                traj = online_data[i][batch_inds[k]]
+                ds = np.random.randint(0, traj[0]['rewards'].shape[0])
+                o_d.append(traj[0]['observations'][ds:ds + max_len_d].reshape(1, -1, agent_obs_dim))
+                a_d.append(traj[0]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                r_d.append(traj[0]['rewards'][ds:ds + max_len_d].reshape(1, -1, 1))
+                timesteps_d.append(np.arange(ds, ds + o_d[-1].shape[1]).reshape(1, -1))
+                timesteps_d[-1][timesteps_d[-1] >= num_steps] = num_steps - 1  # padding cutoff
+                rtg_d.append(discount_cumsum(traj[0]['rewards'][ds:], gamma=1.)[:o_d[-1].shape[1] + 1].reshape(1, -1, 1))
+                if rtg_d[-1].shape[1] <= o_d[-1].shape[1]:
+                    rtg_d[-1] = np.concatenate([rtg_d[-1], np.zeros((1, 1, 1))], axis=1)
+                
+                tlen_d = o_d[-1].shape[1]
+                
+                o_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, agent_obs_dim)), o_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_d[-1] = (o_d[-1] - online_agent_obs_mean_list[i]) / online_agent_obs_std_list[i]
+                a_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_d[-1]], axis=1)
+                r_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), r_d[-1]], axis=1)
+                rtg_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), rtg_d[-1]], axis=1) / reward_scale
+                timesteps_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d)), timesteps_d[-1]], axis=1)
+                mask_d.append(np.concatenate([np.zeros((1, max_len_d - tlen_d)), np.ones((1, tlen_d))], axis=1))
+                
+                o_e_d.append(traj[1]['observations'][ds:ds + max_len_d].reshape(1, -1, oppo_obs_dim))
+                a_e_d.append(traj[1]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                
+                o_e_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, oppo_obs_dim)), o_e_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_e_d[-1] = (o_e_d[-1] - online_oppo_obs_mean_list[i]) / online_oppo_obs_std_list[i]
+                a_e_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_e_d[-1]], axis=1)
+                
+                oppo_batch_inds = np.random.choice(
+                    np.arange(online_num_trajs_list[i]),
+                    size=ocw_size,
+                    replace=False,
+                )
+                n_o_e_, a_e_, r_e_, timesteps_e_, mask_e_ = [], [], [], [], []
+                for j in range(ocw_size):
+                    oppo_traj = online_data[i][oppo_batch_inds[j]]
+                    es = np.random.randint(0, oppo_traj[1]['rewards'].shape[0])
+                    n_o_e_.append(oppo_traj[1]['next_observations'][es:es+max_len_e].reshape(1, -1, oppo_obs_dim))
+                    a_e_.append(oppo_traj[1]['actions'][es:es+max_len_e].reshape(1, -1, act_dim))
+                    r_e_.append(oppo_traj[1]['rewards'][es:es+max_len_e].reshape(1, -1, 1))
+                    timesteps_e_.append(np.arange((es+1), (es+1+n_o_e_[-1].shape[1])).reshape(1, -1))
+                    timesteps_e_[-1][timesteps_e_[-1] >= (num_steps+1)] = num_steps
+                    
+                    tlen_e = n_o_e_[-1].shape[1]
+                    
+                    n_o_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, oppo_obs_dim)), n_o_e_[-1]], axis=1)
+                    if config_dict["OBS_NORMALIZE"]:
+                        n_o_e_[-1] = (n_o_e_[-1] - online_oppo_obs_mean_list[i]) / online_oppo_obs_std_list[i]
+                    a_e_[-1] = np.concatenate([np.ones((1, max_len_e - tlen_e, act_dim)) * -10., a_e_[-1]], axis=1)
+                    r_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, 1)), r_e_[-1]], axis=1)
+                    timesteps_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e)), timesteps_e_[-1]], axis=1)
+                    mask_e_.append(np.concatenate([np.zeros((1, max_len_e - tlen_e)), np.ones((1, tlen_e))], axis=1))
+                n_o_e.append(np.concatenate(n_o_e_, axis=1))
+                a_e.append(np.concatenate(a_e_, axis=1))
+                r_e.append(np.concatenate(r_e_, axis=1))
+                timesteps_e.append(np.concatenate(timesteps_e_, axis=1))
+                mask_e.append(np.concatenate(mask_e_, axis=1))
+
+        o_d = torch.from_numpy(np.concatenate(o_d, axis=0)).to(dtype=torch.float32, device=device)
+        a_d = torch.from_numpy(np.concatenate(a_d, axis=0)).to(dtype=torch.float32, device=device)
+        r_d = torch.from_numpy(np.concatenate(r_d, axis=0)).to(dtype=torch.float32, device=device)
+        rtg_d = torch.from_numpy(np.concatenate(rtg_d, axis=0)).to(dtype=torch.float32, device=device)
+        timesteps_d = torch.from_numpy(np.concatenate(timesteps_d, axis=0)).to(dtype=torch.long, device=device)
+        mask_d = torch.from_numpy(np.concatenate(mask_d, axis=0)).to(device=device)
+
+        n_o_e = torch.from_numpy(np.concatenate(n_o_e, axis=0)).to(dtype=torch.float32, device=device)
+        a_e = torch.from_numpy(np.concatenate(a_e, axis=0)).to(dtype=torch.float32, device=device)
+        r_e = torch.from_numpy(np.concatenate(r_e, axis=0)).to(dtype=torch.float32, device=device)
+        timesteps_e = torch.from_numpy(np.concatenate(timesteps_e, axis=0)).to(dtype=torch.long, device=device)
+        mask_e = torch.from_numpy(np.concatenate(mask_e, axis=0)).to(device=device)
+        o_e_d = torch.from_numpy(np.concatenate(o_e_d, axis=0)).to(dtype=torch.float32, device=device)
+        a_e_d = torch.from_numpy(np.concatenate(a_e_d, axis=0)).to(dtype=torch.float32, device=device)
+        
+        return n_o_e, a_e, r_e, timesteps_e, mask_e, o_d, a_d, r_d, rtg_d, timesteps_d, mask_d, o_e_d, a_e_d
+    
+    return fn 
+
+
+def get_batch_mix_new(offline_data, online_data, config_dict):
+    agent_obs_dim = config_dict["AGENT_OBS_DIM"]
+    oppo_obs_dim = config_dict["OPPO_OBS_DIM"]
+    act_dim = config_dict["ACT_DIM"]
+    num_offline_oppo_policy = len(offline_data)
+    num_online_oppo_policy = len(online_data)
+    offline_num_trajs_list = config_dict["NUM_TRAJS"]
+    online_num_trajs_list = [len(online_data[0])]
+    batch_size = config_dict["BATCH_SIZE"]
+    K_encoder = config_dict["K"]
+    K_decoder = config_dict["K"]
+    num_steps = config_dict["NUM_STEPS"]
+    if config_dict["OBS_NORMALIZE"]:
+        offline_agent_obs_mean_list = config_dict["OFFLINE_AGENT_OBS_MEAN"]
+        offline_agent_obs_std_list = config_dict["OFFLINE_AGENT_OBS_STD"]
+        offline_oppo_obs_mean_list = config_dict["OFFLINE_OPPO_OBS_MEAN"]
+        offline_oppo_obs_std_list = config_dict["OFFLINE_OPPO_OBS_STD"]
+        online_agent_obs_mean_list = config_dict["ONLINE_AGENT_OBS_MEAN"]
+        online_agent_obs_std_list = config_dict["ONLINE_AGENT_OBS_STD"]
+        online_oppo_obs_mean_list = config_dict["ONLINE_OPPO_OBS_MEAN"]
+        online_oppo_obs_std_list = config_dict["ONLINE_OPPO_OBS_STD"]
+    reward_scale = config_dict["REWARD_SCALE"]
+    device = config_dict["DEVICE"]
+    ocw_size = config_dict["OCW_SIZE"]   # 5
+    target_test = 35
+    def fn(batch_size=batch_size, max_len_e=K_encoder, max_len_d=K_decoder):
+        n_o_e, a_e, r_e, timesteps_e, mask_e = [], [], [], [], []
+        o_d, a_d, r_d, rtg_d, timesteps_d, mask_d = [], [], [], [], [], []
+        o_e_d, a_e_d = [], []
+        for i in range(num_offline_oppo_policy):
+            batch_inds = np.random.choice(
+                np.arange(offline_num_trajs_list[i]),
+                size=batch_size,
+                replace=False,
+            )    # 得到索引
+            for k in range(batch_size):
+                traj = offline_data[i][batch_inds[k]]
+                ds = np.random.randint(0, traj[0]['rewards'].shape[0])
+                o_d.append(traj[0]['observations'][ds:ds + max_len_d].reshape(1, -1, agent_obs_dim))
+                a_d.append(traj[0]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                r_d.append(traj[0]['rewards'][ds:ds + max_len_d].reshape(1, -1, 1))
+                timesteps_d.append(np.arange(ds, ds + o_d[-1].shape[1]).reshape(1, -1))
+                timesteps_d[-1][timesteps_d[-1] >= num_steps] = num_steps - 1  # padding cutoff
+                rtg_d.append(discount_cumsum(traj[0]['rewards'][ds:], gamma=1.)[:o_d[-1].shape[1] + 1].reshape(1, -1, 1))
+                if rtg_d[-1].shape[1] <= o_d[-1].shape[1]:
+                    rtg_d[-1] = np.concatenate([rtg_d[-1], np.zeros((1, 1, 1))], axis=1)
+                
+                tlen_d = o_d[-1].shape[1]
+                
+                o_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, agent_obs_dim)), o_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_d[-1] = (o_d[-1] - offline_agent_obs_mean_list[i]) / offline_agent_obs_std_list[i]
+                a_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_d[-1]], axis=1)
+                r_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), r_d[-1]], axis=1)
+                rtg_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), rtg_d[-1]], axis=1) / reward_scale
+                timesteps_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d)), timesteps_d[-1]], axis=1)
+                mask_d.append(np.concatenate([np.zeros((1, max_len_d - tlen_d)), np.ones((1, tlen_d))], axis=1))
+                
+                o_e_d.append(traj[1]['observations'][ds:ds + max_len_d].reshape(1, -1, oppo_obs_dim))
+                a_e_d.append(traj[1]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                
+                o_e_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, oppo_obs_dim)), o_e_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_e_d[-1] = (o_e_d[-1] - offline_oppo_obs_mean_list[i]) / offline_oppo_obs_std_list[i]
+                a_e_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_e_d[-1]], axis=1)
+                
+                oppo_batch_inds = np.random.choice(
+                    np.arange(offline_num_trajs_list[i]),
+                    size=ocw_size,
+                    replace=False,
+                )
+                n_o_e_, a_e_, r_e_, timesteps_e_, mask_e_ = [], [], [], [], []
+                for j in range(ocw_size):
+                    oppo_traj = offline_data[i][oppo_batch_inds[j]]
+                    es = np.random.randint(0, oppo_traj[1]['rewards'].shape[0])
+                    n_o_e_.append(oppo_traj[1]['next_observations'][es:es+max_len_e].reshape(1, -1, oppo_obs_dim))
+                    a_e_.append(oppo_traj[1]['actions'][es:es+max_len_e].reshape(1, -1, act_dim))
+                    r_e_.append(oppo_traj[1]['rewards'][es:es+max_len_e].reshape(1, -1, 1))
+                    timesteps_e_.append(np.arange((es+1), (es+1+n_o_e_[-1].shape[1])).reshape(1, -1))
+                    timesteps_e_[-1][timesteps_e_[-1] >= (num_steps+1)] = num_steps
+                    
+                    tlen_e = n_o_e_[-1].shape[1]
+                    
+                    n_o_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, oppo_obs_dim)), n_o_e_[-1]], axis=1)
+                    if config_dict["OBS_NORMALIZE"]:
+                        n_o_e_[-1] = (n_o_e_[-1] - offline_oppo_obs_mean_list[i]) / offline_oppo_obs_std_list[i]
+                    a_e_[-1] = np.concatenate([np.ones((1, max_len_e - tlen_e, act_dim)) * -10., a_e_[-1]], axis=1)
+                    r_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, 1)), r_e_[-1]], axis=1)
+                    timesteps_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e)), timesteps_e_[-1]], axis=1)
+                    mask_e_.append(np.concatenate([np.zeros((1, max_len_e - tlen_e)), np.ones((1, tlen_e))], axis=1))
+                n_o_e.append(np.concatenate(n_o_e_, axis=1))
+                a_e.append(np.concatenate(a_e_, axis=1))
+                r_e.append(np.concatenate(r_e_, axis=1))
+                timesteps_e.append(np.concatenate(timesteps_e_, axis=1))
+                mask_e.append(np.concatenate(mask_e_, axis=1))
+        for i in range(num_online_oppo_policy):
+            batch_inds = np.random.choice(
+                np.arange(online_num_trajs_list[i]),
+                size=batch_size,
+                replace=False,
+            )    # 得到索引
+            # batch_inds = get_batch_inds_good(online_data, target_test)
+            for k in range(batch_size):
+                traj = online_data[i][batch_inds[k]]
+                ds = np.random.randint(0, traj[0]['rewards'].shape[0])
+                o_d.append(traj[0]['observations'][ds:ds + max_len_d].reshape(1, -1, agent_obs_dim))
+                a_d.append(traj[0]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                r_d.append(traj[0]['rewards'][ds:ds + max_len_d].reshape(1, -1, 1))
+                timesteps_d.append(np.arange(ds, ds + o_d[-1].shape[1]).reshape(1, -1))
+                timesteps_d[-1][timesteps_d[-1] >= num_steps] = num_steps - 1  # padding cutoff
+                rtg_d.append(discount_cumsum(traj[0]['rewards'][ds:], gamma=1.)[:o_d[-1].shape[1] + 1].reshape(1, -1, 1))
+                if rtg_d[-1].shape[1] <= o_d[-1].shape[1]:
+                    rtg_d[-1] = np.concatenate([rtg_d[-1], np.zeros((1, 1, 1))], axis=1)
+                
+                tlen_d = o_d[-1].shape[1]
+                
+                o_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, agent_obs_dim)), o_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_d[-1] = (o_d[-1] - online_agent_obs_mean_list[i]) / online_agent_obs_std_list[i]
+                a_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_d[-1]], axis=1)
+                r_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), r_d[-1]], axis=1)
+                rtg_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), rtg_d[-1]], axis=1) / reward_scale
+                timesteps_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d)), timesteps_d[-1]], axis=1)
+                mask_d.append(np.concatenate([np.zeros((1, max_len_d - tlen_d)), np.ones((1, tlen_d))], axis=1))
+                
+                o_e_d.append(traj[1]['observations'][ds:ds + max_len_d].reshape(1, -1, oppo_obs_dim))
+                a_e_d.append(traj[1]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                
+                o_e_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, oppo_obs_dim)), o_e_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_e_d[-1] = (o_e_d[-1] - online_oppo_obs_mean_list[i]) / online_oppo_obs_std_list[i]
+                a_e_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_e_d[-1]], axis=1)
+                
+                oppo_batch_inds = np.random.choice(
+                    np.arange(online_num_trajs_list[i]),
+                    size=ocw_size,
+                    replace=False,
+                )
+                n_o_e_, a_e_, r_e_, timesteps_e_, mask_e_ = [], [], [], [], []
+                for j in range(ocw_size):
+                    oppo_traj = online_data[i][oppo_batch_inds[j]]
+                    es = np.random.randint(0, oppo_traj[1]['rewards'].shape[0])
+                    n_o_e_.append(oppo_traj[1]['next_observations'][es:es+max_len_e].reshape(1, -1, oppo_obs_dim))
+                    a_e_.append(oppo_traj[1]['actions'][es:es+max_len_e].reshape(1, -1, act_dim))
+                    r_e_.append(oppo_traj[1]['rewards'][es:es+max_len_e].reshape(1, -1, 1))
+                    timesteps_e_.append(np.arange((es+1), (es+1+n_o_e_[-1].shape[1])).reshape(1, -1))
+                    timesteps_e_[-1][timesteps_e_[-1] >= (num_steps+1)] = num_steps
+                    
+                    tlen_e = n_o_e_[-1].shape[1]
+                    
+                    n_o_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, oppo_obs_dim)), n_o_e_[-1]], axis=1)
+                    if config_dict["OBS_NORMALIZE"]:
+                        n_o_e_[-1] = (n_o_e_[-1] - online_oppo_obs_mean_list[i]) / online_oppo_obs_std_list[i]
+                    a_e_[-1] = np.concatenate([np.ones((1, max_len_e - tlen_e, act_dim)) * -10., a_e_[-1]], axis=1)
+                    r_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, 1)), r_e_[-1]], axis=1)
+                    timesteps_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e)), timesteps_e_[-1]], axis=1)
+                    mask_e_.append(np.concatenate([np.zeros((1, max_len_e - tlen_e)), np.ones((1, tlen_e))], axis=1))
+                n_o_e.append(np.concatenate(n_o_e_, axis=1))
+                a_e.append(np.concatenate(a_e_, axis=1))
+                r_e.append(np.concatenate(r_e_, axis=1))
+                timesteps_e.append(np.concatenate(timesteps_e_, axis=1))
+                mask_e.append(np.concatenate(mask_e_, axis=1))
+
+        o_d = torch.from_numpy(np.concatenate(o_d, axis=0)).to(dtype=torch.float32, device=device)
+        a_d = torch.from_numpy(np.concatenate(a_d, axis=0)).to(dtype=torch.float32, device=device)
+        r_d = torch.from_numpy(np.concatenate(r_d, axis=0)).to(dtype=torch.float32, device=device)
+        rtg_d = torch.from_numpy(np.concatenate(rtg_d, axis=0)).to(dtype=torch.float32, device=device)
+        timesteps_d = torch.from_numpy(np.concatenate(timesteps_d, axis=0)).to(dtype=torch.long, device=device)
+        mask_d = torch.from_numpy(np.concatenate(mask_d, axis=0)).to(device=device)
+
+        n_o_e = torch.from_numpy(np.concatenate(n_o_e, axis=0)).to(dtype=torch.float32, device=device)
+        a_e = torch.from_numpy(np.concatenate(a_e, axis=0)).to(dtype=torch.float32, device=device)
+        r_e = torch.from_numpy(np.concatenate(r_e, axis=0)).to(dtype=torch.float32, device=device)
+        timesteps_e = torch.from_numpy(np.concatenate(timesteps_e, axis=0)).to(dtype=torch.long, device=device)
+        mask_e = torch.from_numpy(np.concatenate(mask_e, axis=0)).to(device=device)
+        o_e_d = torch.from_numpy(np.concatenate(o_e_d, axis=0)).to(dtype=torch.float32, device=device)
+        a_e_d = torch.from_numpy(np.concatenate(a_e_d, axis=0)).to(dtype=torch.float32, device=device)
+        
+        return n_o_e, a_e, r_e, timesteps_e, mask_e, o_d, a_d, r_d, rtg_d, timesteps_d, mask_d, o_e_d, a_e_d
+    
+    return fn 
+
+
+def eval_offline_episodes(env, oppo_policy, config, oppo_id, oppo_name):
+    agent_obs_dim, oppo_obs_dim, act_dim = config['AGENT_OBS_DIM'], config['OPPO_OBS_DIM'], config['ACT_DIM']
+    if config['OBS_NORMALIZE']:
+        agent_obs_mean, agent_obs_std = config['OFFLINE_AGENT_OBS_MEAN'][oppo_id], config['OFFLINE_AGENT_OBS_STD'][oppo_id]
+        oppo_obs_mean, oppo_obs_std = config['OFFLINE_OPPO_OBS_MEAN'][oppo_id], config['OFFLINE_OPPO_OBS_STD'][oppo_id]
+    else:
+        agent_obs_mean, agent_obs_std = np.array(0.), np.array(1.)
+        oppo_obs_mean, oppo_obs_std = np.array(0.), np.array(1.)
+    agent_index, oppo_index = config["AGENT_INDEX"], config["OPPO_INDEX"]
+    num_eval_episodes, num_steps = config["NUM_EVAL_EPISODES"], config["NUM_STEPS"]
+    if oppo_name in config["SEEN_OPPO_POLICY"]:
+        target_rtg = config["OPPO_TARGET"][oppo_id]
+    else:
+        target_rtg = np.mean(config["OPPO_TARGET"])
+    reward_scale = config["REWARD_SCALE"]
+    env_type = config["ENV_TYPE"]
+    if isinstance(oppo_name, tuple):
+        oppo_name_ = oppo_name[0]+'_'+oppo_name[-1]
+    else:
+        oppo_name_ = oppo_name
+    c_dim = config["C_DIM"]
+    device = config["EVAL_DEVICE"]
+    eval_mode = config['EVAL_MODE']
+    ocw_size = config["OCW_SIZE"]
+    
+    def fn(encoder, decoder):
+        returns = []
+        oppo_context_window = None
+        for _ in range(num_eval_episodes):
+            with torch.no_grad():
+                ret, oppo_context_window_new = eval_episode_rtg(
+                    env,
+                    env_type,
+                    agent_obs_dim,
+                    oppo_obs_dim,
+                    act_dim,
+                    c_dim,
+                    encoder,
+                    decoder,
+                    oppo_policy,
+                    agent_index,
+                    oppo_index,
+                    num_steps=num_steps,
+                    reward_scale=reward_scale,
+                    target_rtg=target_rtg / reward_scale,
+                    eval_mode=eval_mode,
+                    agent_obs_mean=agent_obs_mean,
+                    agent_obs_std=agent_obs_std,
+                    oppo_obs_mean=oppo_obs_mean,
+                    oppo_obs_std=oppo_obs_std,
+                    oppo_context_window=oppo_context_window,
+                    device=device,
+                    obs_normalize=config['OBS_NORMALIZE'],
+                    )
+                oppo_context_window = oppo_context_window_new
+                oppo_context_window = oppo_context_window[-ocw_size:]
+            returns.append(ret)
+        return {
+            f'{oppo_name_}_target_{target_rtg:.3f}_return_mean': np.mean(returns),
+        }, np.mean(returns)
+    return fn
+
+
+def eval_online_episodes(env, oppo_policy, config, oppo_id, oppo_name):
+    agent_obs_dim, oppo_obs_dim, act_dim = config['AGENT_OBS_DIM'], config['OPPO_OBS_DIM'], config['ACT_DIM']
+    if config['OBS_NORMALIZE']:
+        agent_obs_mean, agent_obs_std = config['ONLINE_AGENT_OBS_MEAN'][oppo_id], config['ONLINE_AGENT_OBS_STD'][oppo_id]
+        oppo_obs_mean, oppo_obs_std = config['ONLINE_OPPO_OBS_MEAN'][oppo_id], config['ONLINE_OPPO_OBS_STD'][oppo_id]
+    else:
+        agent_obs_mean, agent_obs_std = np.array(0.), np.array(1.)
+        oppo_obs_mean, oppo_obs_std = np.array(0.), np.array(1.)
+    agent_index, oppo_index = config["AGENT_INDEX"], config["OPPO_INDEX"]
+    num_eval_episodes, num_steps = config["NUM_EVAL_EPISODES"], config["NUM_STEPS"]
+    if oppo_name in config["SEEN_OPPO_POLICY"]:
+        target_rtg = config["OPPO_TARGET"][oppo_id]
+    else:
+        target_rtg = np.mean(config["OPPO_TARGET"])
+    reward_scale = config["REWARD_SCALE"]
+    env_type = config["ENV_TYPE"]
+    if isinstance(oppo_name, tuple):
+        oppo_name_ = oppo_name[0]+'_'+oppo_name[-1]
+    else:
+        oppo_name_ = oppo_name
+    c_dim = config["C_DIM"]
+    device = config["EVAL_DEVICE"]
+    eval_mode = config['EVAL_MODE']
+    ocw_size = config["OCW_SIZE"]
+    
+    def fn(encoder, decoder):
+        returns = []
+        oppo_context_window = None
+        for _ in range(num_eval_episodes):
+            with torch.no_grad():
+                ret, oppo_context_window_new = eval_episode_rtg(
+                    env,
+                    env_type,
+                    agent_obs_dim,
+                    oppo_obs_dim,
+                    act_dim,
+                    c_dim,
+                    encoder,
+                    decoder,
+                    oppo_policy,
+                    agent_index,
+                    oppo_index,
+                    num_steps=num_steps,
+                    reward_scale=reward_scale,
+                    target_rtg=target_rtg / reward_scale,
+                    eval_mode=eval_mode,
+                    agent_obs_mean=agent_obs_mean,
+                    agent_obs_std=agent_obs_std,
+                    oppo_obs_mean=oppo_obs_mean,
+                    oppo_obs_std=oppo_obs_std,
+                    oppo_context_window=oppo_context_window,
+                    device=device,
+                    obs_normalize=config['OBS_NORMALIZE'],
+                    )
+                oppo_context_window = oppo_context_window_new
+                oppo_context_window = oppo_context_window[-ocw_size:]
+            returns.append(ret)
+        return {
+            f'{oppo_name_}_target_{target_rtg:.3f}_return_mean': np.mean(returns),
+        }, np.mean(returns)
+    return fn
+
+
+def get_batch_online(online_data, config_dict):
+    agent_obs_dim = config_dict["AGENT_OBS_DIM"]
+    oppo_obs_dim = config_dict["OPPO_OBS_DIM"]
+    act_dim = config_dict["ACT_DIM"]
+    num_online_oppo_policy = len(online_data)
+    online_num_trajs_list = [len(online_data[0])]
+    batch_size = config_dict["BATCH_SIZE"]
+    K_encoder = config_dict["K"]
+    K_decoder = config_dict["K"]
+    num_steps = config_dict["NUM_STEPS"]
+    if config_dict["OBS_NORMALIZE"]:
+        online_agent_obs_mean_list = config_dict["ONLINE_AGENT_OBS_MEAN"]
+        online_agent_obs_std_list = config_dict["ONLINE_AGENT_OBS_STD"]
+        online_oppo_obs_mean_list = config_dict["ONLINE_OPPO_OBS_MEAN"]
+        online_oppo_obs_std_list = config_dict["ONLINE_OPPO_OBS_STD"]
+    reward_scale = config_dict["REWARD_SCALE"]
+    device = config_dict["DEVICE"]
+    ocw_size = config_dict["OCW_SIZE"]   # 5
+    def fn(batch_size=batch_size, max_len_e=K_encoder, max_len_d=K_decoder):
+        n_o_e, a_e, r_e, timesteps_e, mask_e = [], [], [], [], []
+        o_d, a_d, r_d, rtg_d, timesteps_d, mask_d = [], [], [], [], [], []
+        o_e_d, a_e_d = [], []
+        for i in range(num_online_oppo_policy):
+            batch_inds = np.random.choice(
+                np.arange(online_num_trajs_list[i]),
+                size=batch_size,
+                replace=False,
+            )    # 得到索引
+            for k in range(batch_size):
+                traj = online_data[i][batch_inds[k]]
+                ds = np.random.randint(0, traj[0]['rewards'].shape[0])
+                o_d.append(traj[0]['observations'][ds:ds + max_len_d].reshape(1, -1, agent_obs_dim))
+                a_d.append(traj[0]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                r_d.append(traj[0]['rewards'][ds:ds + max_len_d].reshape(1, -1, 1))
+                timesteps_d.append(np.arange(ds, ds + o_d[-1].shape[1]).reshape(1, -1))
+                timesteps_d[-1][timesteps_d[-1] >= num_steps] = num_steps - 1  # padding cutoff
+                rtg_d.append(discount_cumsum(traj[0]['rewards'][ds:], gamma=1.)[:o_d[-1].shape[1] + 1].reshape(1, -1, 1))
+                if rtg_d[-1].shape[1] <= o_d[-1].shape[1]:
+                    rtg_d[-1] = np.concatenate([rtg_d[-1], np.zeros((1, 1, 1))], axis=1)
+                
+                tlen_d = o_d[-1].shape[1]
+                
+                o_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, agent_obs_dim)), o_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_d[-1] = (o_d[-1] - online_agent_obs_mean_list[i]) / online_agent_obs_std_list[i]
+                a_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_d[-1]], axis=1)
+                r_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), r_d[-1]], axis=1)
+                rtg_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), rtg_d[-1]], axis=1) / reward_scale
+                timesteps_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d)), timesteps_d[-1]], axis=1)
+                mask_d.append(np.concatenate([np.zeros((1, max_len_d - tlen_d)), np.ones((1, tlen_d))], axis=1))
+                
+                o_e_d.append(traj[1]['observations'][ds:ds + max_len_d].reshape(1, -1, oppo_obs_dim))
+                a_e_d.append(traj[1]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                
+                o_e_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, oppo_obs_dim)), o_e_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_e_d[-1] = (o_e_d[-1] - online_oppo_obs_mean_list[i]) / online_oppo_obs_std_list[i]
+                a_e_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_e_d[-1]], axis=1)
+                
+                oppo_batch_inds = np.random.choice(
+                    np.arange(online_num_trajs_list[i]),
+                    size=ocw_size,
+                    replace=False,
+                )
+                n_o_e_, a_e_, r_e_, timesteps_e_, mask_e_ = [], [], [], [], []
+                for j in range(ocw_size):
+                    oppo_traj = online_data[i][oppo_batch_inds[j]]
+                    es = np.random.randint(0, oppo_traj[1]['rewards'].shape[0])
+                    n_o_e_.append(oppo_traj[1]['next_observations'][es:es+max_len_e].reshape(1, -1, oppo_obs_dim))
+                    a_e_.append(oppo_traj[1]['actions'][es:es+max_len_e].reshape(1, -1, act_dim))
+                    r_e_.append(oppo_traj[1]['rewards'][es:es+max_len_e].reshape(1, -1, 1))
+                    timesteps_e_.append(np.arange((es+1), (es+1+n_o_e_[-1].shape[1])).reshape(1, -1))
+                    timesteps_e_[-1][timesteps_e_[-1] >= (num_steps+1)] = num_steps
+                    
+                    tlen_e = n_o_e_[-1].shape[1]
+                    
+                    n_o_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, oppo_obs_dim)), n_o_e_[-1]], axis=1)
+                    if config_dict["OBS_NORMALIZE"]:
+                        n_o_e_[-1] = (n_o_e_[-1] - online_oppo_obs_mean_list[i]) / online_oppo_obs_std_list[i]
+                    a_e_[-1] = np.concatenate([np.ones((1, max_len_e - tlen_e, act_dim)) * -10., a_e_[-1]], axis=1)
+                    r_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, 1)), r_e_[-1]], axis=1)
+                    timesteps_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e)), timesteps_e_[-1]], axis=1)
+                    mask_e_.append(np.concatenate([np.zeros((1, max_len_e - tlen_e)), np.ones((1, tlen_e))], axis=1))
+                n_o_e.append(np.concatenate(n_o_e_, axis=1))
+                a_e.append(np.concatenate(a_e_, axis=1))
+                r_e.append(np.concatenate(r_e_, axis=1))
+                timesteps_e.append(np.concatenate(timesteps_e_, axis=1))
+                mask_e.append(np.concatenate(mask_e_, axis=1))
+
+        o_d = torch.from_numpy(np.concatenate(o_d, axis=0)).to(dtype=torch.float32, device=device)
+        a_d = torch.from_numpy(np.concatenate(a_d, axis=0)).to(dtype=torch.float32, device=device)
+        r_d = torch.from_numpy(np.concatenate(r_d, axis=0)).to(dtype=torch.float32, device=device)
+        rtg_d = torch.from_numpy(np.concatenate(rtg_d, axis=0)).to(dtype=torch.float32, device=device)
+        timesteps_d = torch.from_numpy(np.concatenate(timesteps_d, axis=0)).to(dtype=torch.long, device=device)
+        mask_d = torch.from_numpy(np.concatenate(mask_d, axis=0)).to(device=device)
+
+        n_o_e = torch.from_numpy(np.concatenate(n_o_e, axis=0)).to(dtype=torch.float32, device=device)
+        a_e = torch.from_numpy(np.concatenate(a_e, axis=0)).to(dtype=torch.float32, device=device)
+        r_e = torch.from_numpy(np.concatenate(r_e, axis=0)).to(dtype=torch.float32, device=device)
+        timesteps_e = torch.from_numpy(np.concatenate(timesteps_e, axis=0)).to(dtype=torch.long, device=device)
+        mask_e = torch.from_numpy(np.concatenate(mask_e, axis=0)).to(device=device)
+        o_e_d = torch.from_numpy(np.concatenate(o_e_d, axis=0)).to(dtype=torch.float32, device=device)
+        a_e_d = torch.from_numpy(np.concatenate(a_e_d, axis=0)).to(dtype=torch.float32, device=device)
+        
+        return n_o_e, a_e, r_e, timesteps_e, mask_e, o_d, a_d, r_d, rtg_d, timesteps_d, mask_d, o_e_d, a_e_d
+    
+    return fn 
+
+
+def get_batch_online_new(online_data, config_dict):
+    agent_obs_dim = config_dict["AGENT_OBS_DIM"]
+    oppo_obs_dim = config_dict["OPPO_OBS_DIM"]
+    act_dim = config_dict["ACT_DIM"]
+    num_online_oppo_policy = len(online_data)
+    online_num_trajs_list = [len(online_data[0])]
+    batch_size = config_dict["BATCH_SIZE"]
+    K_encoder = config_dict["K"]
+    K_decoder = config_dict["K"]
+    num_steps = config_dict["NUM_STEPS"]
+    target_test = 40
+    if config_dict["OBS_NORMALIZE"]:
+        online_agent_obs_mean_list = config_dict["ONLINE_AGENT_OBS_MEAN"]
+        online_agent_obs_std_list = config_dict["ONLINE_AGENT_OBS_STD"]
+        online_oppo_obs_mean_list = config_dict["ONLINE_OPPO_OBS_MEAN"]
+        online_oppo_obs_std_list = config_dict["ONLINE_OPPO_OBS_STD"]
+    reward_scale = config_dict["REWARD_SCALE"]
+    device = config_dict["DEVICE"]
+    ocw_size = config_dict["OCW_SIZE"]   # 5
+    def fn(batch_size=batch_size, max_len_e=K_encoder, max_len_d=K_decoder):
+        n_o_e, a_e, r_e, timesteps_e, mask_e = [], [], [], [], []
+        o_d, a_d, r_d, rtg_d, timesteps_d, mask_d = [], [], [], [], [], []
+        o_e_d, a_e_d = [], []
+        for i in range(num_online_oppo_policy):
+            # batch_inds = np.random.choice(
+            #     np.arange(online_num_trajs_list[i]),
+            #     size=batch_size,
+            #     replace=False,
+            # )    # 得到索引
+            batch_inds = get_batch_inds(online_data, target_test)
+            for k in range(batch_size):
+                traj = online_data[i][batch_inds[k]]
+                ds = np.random.randint(0, traj[0]['rewards'].shape[0])
+                o_d.append(traj[0]['observations'][ds:ds + max_len_d].reshape(1, -1, agent_obs_dim))
+                a_d.append(traj[0]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                r_d.append(traj[0]['rewards'][ds:ds + max_len_d].reshape(1, -1, 1))
+                timesteps_d.append(np.arange(ds, ds + o_d[-1].shape[1]).reshape(1, -1))
+                timesteps_d[-1][timesteps_d[-1] >= num_steps] = num_steps - 1  # padding cutoff
+                rtg_d.append(discount_cumsum(traj[0]['rewards'][ds:], gamma=1.)[:o_d[-1].shape[1] + 1].reshape(1, -1, 1))
+                if rtg_d[-1].shape[1] <= o_d[-1].shape[1]:
+                    rtg_d[-1] = np.concatenate([rtg_d[-1], np.zeros((1, 1, 1))], axis=1)
+                
+                tlen_d = o_d[-1].shape[1]
+                
+                o_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, agent_obs_dim)), o_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_d[-1] = (o_d[-1] - online_agent_obs_mean_list[i]) / online_agent_obs_std_list[i]
+                a_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_d[-1]], axis=1)
+                r_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), r_d[-1]], axis=1)
+                rtg_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), rtg_d[-1]], axis=1) / reward_scale
+                timesteps_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d)), timesteps_d[-1]], axis=1)
+                mask_d.append(np.concatenate([np.zeros((1, max_len_d - tlen_d)), np.ones((1, tlen_d))], axis=1))
+                
+                o_e_d.append(traj[1]['observations'][ds:ds + max_len_d].reshape(1, -1, oppo_obs_dim))
+                a_e_d.append(traj[1]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                
+                o_e_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, oppo_obs_dim)), o_e_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_e_d[-1] = (o_e_d[-1] - online_oppo_obs_mean_list[i]) / online_oppo_obs_std_list[i]
+                a_e_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_e_d[-1]], axis=1)
+                
+                oppo_batch_inds = np.random.choice(
+                    np.arange(online_num_trajs_list[i]),
+                    size=ocw_size,
+                    replace=False,
+                )
+                n_o_e_, a_e_, r_e_, timesteps_e_, mask_e_ = [], [], [], [], []
+                for j in range(ocw_size):
+                    oppo_traj = online_data[i][oppo_batch_inds[j]]
+                    es = np.random.randint(0, oppo_traj[1]['rewards'].shape[0])
+                    n_o_e_.append(oppo_traj[1]['next_observations'][es:es+max_len_e].reshape(1, -1, oppo_obs_dim))
+                    a_e_.append(oppo_traj[1]['actions'][es:es+max_len_e].reshape(1, -1, act_dim))
+                    r_e_.append(oppo_traj[1]['rewards'][es:es+max_len_e].reshape(1, -1, 1))
+                    timesteps_e_.append(np.arange((es+1), (es+1+n_o_e_[-1].shape[1])).reshape(1, -1))
+                    timesteps_e_[-1][timesteps_e_[-1] >= (num_steps+1)] = num_steps
+                    
+                    tlen_e = n_o_e_[-1].shape[1]
+                    
+                    n_o_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, oppo_obs_dim)), n_o_e_[-1]], axis=1)
+                    if config_dict["OBS_NORMALIZE"]:
+                        n_o_e_[-1] = (n_o_e_[-1] - online_oppo_obs_mean_list[i]) / online_oppo_obs_std_list[i]
+                    a_e_[-1] = np.concatenate([np.ones((1, max_len_e - tlen_e, act_dim)) * -10., a_e_[-1]], axis=1)
+                    r_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, 1)), r_e_[-1]], axis=1)
+                    timesteps_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e)), timesteps_e_[-1]], axis=1)
+                    mask_e_.append(np.concatenate([np.zeros((1, max_len_e - tlen_e)), np.ones((1, tlen_e))], axis=1))
+                n_o_e.append(np.concatenate(n_o_e_, axis=1))
+                a_e.append(np.concatenate(a_e_, axis=1))
+                r_e.append(np.concatenate(r_e_, axis=1))
+                timesteps_e.append(np.concatenate(timesteps_e_, axis=1))
+                mask_e.append(np.concatenate(mask_e_, axis=1))
+
+        o_d = torch.from_numpy(np.concatenate(o_d, axis=0)).to(dtype=torch.float32, device=device)
+        a_d = torch.from_numpy(np.concatenate(a_d, axis=0)).to(dtype=torch.float32, device=device)
+        r_d = torch.from_numpy(np.concatenate(r_d, axis=0)).to(dtype=torch.float32, device=device)
+        rtg_d = torch.from_numpy(np.concatenate(rtg_d, axis=0)).to(dtype=torch.float32, device=device)
+        timesteps_d = torch.from_numpy(np.concatenate(timesteps_d, axis=0)).to(dtype=torch.long, device=device)
+        mask_d = torch.from_numpy(np.concatenate(mask_d, axis=0)).to(device=device)
+
+        n_o_e = torch.from_numpy(np.concatenate(n_o_e, axis=0)).to(dtype=torch.float32, device=device)
+        a_e = torch.from_numpy(np.concatenate(a_e, axis=0)).to(dtype=torch.float32, device=device)
+        r_e = torch.from_numpy(np.concatenate(r_e, axis=0)).to(dtype=torch.float32, device=device)
+        timesteps_e = torch.from_numpy(np.concatenate(timesteps_e, axis=0)).to(dtype=torch.long, device=device)
+        mask_e = torch.from_numpy(np.concatenate(mask_e, axis=0)).to(device=device)
+        o_e_d = torch.from_numpy(np.concatenate(o_e_d, axis=0)).to(dtype=torch.float32, device=device)
+        a_e_d = torch.from_numpy(np.concatenate(a_e_d, axis=0)).to(dtype=torch.float32, device=device)
+        
+        return n_o_e, a_e, r_e, timesteps_e, mask_e, o_d, a_d, r_d, rtg_d, timesteps_d, mask_d, o_e_d, a_e_d
+    
+    return fn 
+
+
+
+def get_batch_online_good(online_data, config_dict):
+    agent_obs_dim = config_dict["AGENT_OBS_DIM"]
+    oppo_obs_dim = config_dict["OPPO_OBS_DIM"]
+    act_dim = config_dict["ACT_DIM"]
+    num_online_oppo_policy = len(online_data)
+    online_num_trajs_list = [len(online_data[0])]
+    batch_size = config_dict["BATCH_SIZE"]
+    K_encoder = config_dict["K"]
+    K_decoder = config_dict["K"]
+    num_steps = config_dict["NUM_STEPS"]
+    target_test = 40
+    if config_dict["OBS_NORMALIZE"]:
+        # online_agent_obs_mean_list = config_dict["ONLINE_AGENT_OBS_MEAN"]
+        # online_agent_obs_std_list = config_dict["ONLINE_AGENT_OBS_STD"]
+        # online_oppo_obs_mean_list = config_dict["ONLINE_OPPO_OBS_MEAN"]
+        # online_oppo_obs_std_list = config_dict["ONLINE_OPPO_OBS_STD"]
+        online_agent_obs_mean_list = config_dict["OFFLINE_AGENT_OBS_MEAN"]
+        online_agent_obs_std_list = config_dict["OFFLINE_AGENT_OBS_STD"]
+        online_oppo_obs_mean_list = config_dict["OFFLINE_OPPO_OBS_MEAN"]
+        online_oppo_obs_std_list = config_dict["OFFLINE_OPPO_OBS_STD"]
+    reward_scale = config_dict["REWARD_SCALE"]
+    device = config_dict["DEVICE"]
+    ocw_size = config_dict["OCW_SIZE"]   # 5
+    def fn(batch_size=batch_size, max_len_e=K_encoder, max_len_d=K_decoder):
+        n_o_e, a_e, r_e, timesteps_e, mask_e = [], [], [], [], []
+        o_d, a_d, r_d, rtg_d, timesteps_d, mask_d = [], [], [], [], [], []
+        o_e_d, a_e_d = [], []
+        for i in range(num_online_oppo_policy):
+            # batch_inds = np.random.choice(
+            #     np.arange(online_num_trajs_list[i]),
+            #     size=batch_size,
+            #     replace=False,
+            # )    # 得到索引
+            batch_inds = get_batch_inds_good(online_data, target_test)
+            for k in range(batch_size):
+                traj = online_data[i][batch_inds[k]]
+                ds = np.random.randint(0, traj[0]['rewards'].shape[0])
+                o_d.append(traj[0]['observations'][ds:ds + max_len_d].reshape(1, -1, agent_obs_dim))
+                a_d.append(traj[0]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                r_d.append(traj[0]['rewards'][ds:ds + max_len_d].reshape(1, -1, 1))
+                timesteps_d.append(np.arange(ds, ds + o_d[-1].shape[1]).reshape(1, -1))
+                timesteps_d[-1][timesteps_d[-1] >= num_steps] = num_steps - 1  # padding cutoff
+                rtg_d.append(discount_cumsum(traj[0]['rewards'][ds:], gamma=1.)[:o_d[-1].shape[1] + 1].reshape(1, -1, 1))
+                if rtg_d[-1].shape[1] <= o_d[-1].shape[1]:
+                    rtg_d[-1] = np.concatenate([rtg_d[-1], np.zeros((1, 1, 1))], axis=1)
+                
+                tlen_d = o_d[-1].shape[1]
+                
+                o_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, agent_obs_dim)), o_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_d[-1] = (o_d[-1] - online_agent_obs_mean_list[i]) / online_agent_obs_std_list[i]
+                a_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_d[-1]], axis=1)
+                r_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), r_d[-1]], axis=1)
+                rtg_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), rtg_d[-1]], axis=1) / reward_scale
+                timesteps_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d)), timesteps_d[-1]], axis=1)
+                mask_d.append(np.concatenate([np.zeros((1, max_len_d - tlen_d)), np.ones((1, tlen_d))], axis=1))
+                
+                o_e_d.append(traj[1]['observations'][ds:ds + max_len_d].reshape(1, -1, oppo_obs_dim))
+                a_e_d.append(traj[1]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                
+                o_e_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, oppo_obs_dim)), o_e_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_e_d[-1] = (o_e_d[-1] - online_oppo_obs_mean_list[i]) / online_oppo_obs_std_list[i]
+                a_e_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_e_d[-1]], axis=1)
+                
+                oppo_batch_inds = np.random.choice(
+                    np.arange(online_num_trajs_list[i]),
+                    size=ocw_size,
+                    replace=False,
+                )
+                n_o_e_, a_e_, r_e_, timesteps_e_, mask_e_ = [], [], [], [], []
+                for j in range(ocw_size):
+                    oppo_traj = online_data[i][oppo_batch_inds[j]]
+                    es = np.random.randint(0, oppo_traj[1]['rewards'].shape[0])
+                    n_o_e_.append(oppo_traj[1]['next_observations'][es:es+max_len_e].reshape(1, -1, oppo_obs_dim))
+                    a_e_.append(oppo_traj[1]['actions'][es:es+max_len_e].reshape(1, -1, act_dim))
+                    r_e_.append(oppo_traj[1]['rewards'][es:es+max_len_e].reshape(1, -1, 1))
+                    timesteps_e_.append(np.arange((es+1), (es+1+n_o_e_[-1].shape[1])).reshape(1, -1))
+                    timesteps_e_[-1][timesteps_e_[-1] >= (num_steps+1)] = num_steps
+                    
+                    tlen_e = n_o_e_[-1].shape[1]
+                    
+                    n_o_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, oppo_obs_dim)), n_o_e_[-1]], axis=1)
+                    if config_dict["OBS_NORMALIZE"]:
+                        n_o_e_[-1] = (n_o_e_[-1] - online_oppo_obs_mean_list[i]) / online_oppo_obs_std_list[i]
+                    a_e_[-1] = np.concatenate([np.ones((1, max_len_e - tlen_e, act_dim)) * -10., a_e_[-1]], axis=1)
+                    r_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, 1)), r_e_[-1]], axis=1)
+                    timesteps_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e)), timesteps_e_[-1]], axis=1)
+                    mask_e_.append(np.concatenate([np.zeros((1, max_len_e - tlen_e)), np.ones((1, tlen_e))], axis=1))
+                n_o_e.append(np.concatenate(n_o_e_, axis=1))
+                a_e.append(np.concatenate(a_e_, axis=1))
+                r_e.append(np.concatenate(r_e_, axis=1))
+                timesteps_e.append(np.concatenate(timesteps_e_, axis=1))
+                mask_e.append(np.concatenate(mask_e_, axis=1))
+
+        o_d = torch.from_numpy(np.concatenate(o_d, axis=0)).to(dtype=torch.float32, device=device)
+        a_d = torch.from_numpy(np.concatenate(a_d, axis=0)).to(dtype=torch.float32, device=device)
+        r_d = torch.from_numpy(np.concatenate(r_d, axis=0)).to(dtype=torch.float32, device=device)
+        rtg_d = torch.from_numpy(np.concatenate(rtg_d, axis=0)).to(dtype=torch.float32, device=device)
+        timesteps_d = torch.from_numpy(np.concatenate(timesteps_d, axis=0)).to(dtype=torch.long, device=device)
+        mask_d = torch.from_numpy(np.concatenate(mask_d, axis=0)).to(device=device)
+
+        n_o_e = torch.from_numpy(np.concatenate(n_o_e, axis=0)).to(dtype=torch.float32, device=device)
+        a_e = torch.from_numpy(np.concatenate(a_e, axis=0)).to(dtype=torch.float32, device=device)
+        r_e = torch.from_numpy(np.concatenate(r_e, axis=0)).to(dtype=torch.float32, device=device)
+        timesteps_e = torch.from_numpy(np.concatenate(timesteps_e, axis=0)).to(dtype=torch.long, device=device)
+        mask_e = torch.from_numpy(np.concatenate(mask_e, axis=0)).to(device=device)
+        o_e_d = torch.from_numpy(np.concatenate(o_e_d, axis=0)).to(dtype=torch.float32, device=device)
+        a_e_d = torch.from_numpy(np.concatenate(a_e_d, axis=0)).to(dtype=torch.float32, device=device)
+        
+        return n_o_e, a_e, r_e, timesteps_e, mask_e, o_d, a_d, r_d, rtg_d, timesteps_d, mask_d, o_e_d, a_e_d
+    
+    return fn 
+
+
+
+def get_batch_mix_revise(offline_data, online_data, config_dict):
+    agent_obs_dim = config_dict["AGENT_OBS_DIM"]
+    oppo_obs_dim = config_dict["OPPO_OBS_DIM"]
+    act_dim = config_dict["ACT_DIM"]
+    num_offline_oppo_policy = len(offline_data)
+    num_online_oppo_policy = len(online_data)
+    offline_num_trajs_list = config_dict["NUM_TRAJS"]
+    online_num_trajs_list = [len(online_data[0])]
+    batch_size = config_dict["BATCH_SIZE"]
+    K_encoder = config_dict["K"]
+    K_decoder = config_dict["K"]
+    num_steps = config_dict["NUM_STEPS"]
+    if config_dict["OBS_NORMALIZE"]:
+        agent_obs_mean_list = config_dict["OFFLINE_AGENT_OBS_MEAN"]
+        agent_obs_std_list = config_dict["OFFLINE_AGENT_OBS_STD"]
+        oppo_obs_mean_list = config_dict["OFFLINE_OPPO_OBS_MEAN"]
+        oppo_obs_std_list = config_dict["OFFLINE_OPPO_OBS_STD"]
+    reward_scale = config_dict["REWARD_SCALE"]
+    device = config_dict["DEVICE"]
+    ocw_size = config_dict["OCW_SIZE"]   # 5
+    def fn(batch_size=batch_size, max_len_e=K_encoder, max_len_d=K_decoder):
+        n_o_e, a_e, r_e, timesteps_e, mask_e = [], [], [], [], []
+        o_d, a_d, r_d, rtg_d, timesteps_d, mask_d = [], [], [], [], [], []
+        o_e_d, a_e_d = [], []
+        for i in range(num_offline_oppo_policy):
+            batch_inds = np.random.choice(
+                np.arange(offline_num_trajs_list[i]),
+                size=batch_size,
+                replace=False,
+            )    # 得到索引
+            for k in range(batch_size):
+                traj = offline_data[i][batch_inds[k]]
+                ds = np.random.randint(0, traj[0]['rewards'].shape[0])
+                o_d.append(traj[0]['observations'][ds:ds + max_len_d].reshape(1, -1, agent_obs_dim))
+                a_d.append(traj[0]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                r_d.append(traj[0]['rewards'][ds:ds + max_len_d].reshape(1, -1, 1))
+                timesteps_d.append(np.arange(ds, ds + o_d[-1].shape[1]).reshape(1, -1))
+                timesteps_d[-1][timesteps_d[-1] >= num_steps] = num_steps - 1  # padding cutoff
+                rtg_d.append(discount_cumsum(traj[0]['rewards'][ds:], gamma=1.)[:o_d[-1].shape[1] + 1].reshape(1, -1, 1))
+                if rtg_d[-1].shape[1] <= o_d[-1].shape[1]:
+                    rtg_d[-1] = np.concatenate([rtg_d[-1], np.zeros((1, 1, 1))], axis=1)
+                
+                tlen_d = o_d[-1].shape[1]
+                
+                o_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, agent_obs_dim)), o_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_d[-1] = (o_d[-1] - agent_obs_mean_list[i]) / agent_obs_std_list[i]
+                a_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_d[-1]], axis=1)
+                r_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), r_d[-1]], axis=1)
+                rtg_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), rtg_d[-1]], axis=1) / reward_scale
+                timesteps_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d)), timesteps_d[-1]], axis=1)
+                mask_d.append(np.concatenate([np.zeros((1, max_len_d - tlen_d)), np.ones((1, tlen_d))], axis=1))
+                
+                o_e_d.append(traj[1]['observations'][ds:ds + max_len_d].reshape(1, -1, oppo_obs_dim))
+                a_e_d.append(traj[1]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                
+                o_e_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, oppo_obs_dim)), o_e_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_e_d[-1] = (o_e_d[-1] - oppo_obs_mean_list[i]) / oppo_obs_std_list[i]
+                a_e_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_e_d[-1]], axis=1)
+                
+                oppo_batch_inds = np.random.choice(
+                    np.arange(offline_num_trajs_list[i]),
+                    size=ocw_size,
+                    replace=False,
+                )
+                n_o_e_, a_e_, r_e_, timesteps_e_, mask_e_ = [], [], [], [], []
+                for j in range(ocw_size):
+                    oppo_traj = offline_data[i][oppo_batch_inds[j]]
+                    es = np.random.randint(0, oppo_traj[1]['rewards'].shape[0])
+                    n_o_e_.append(oppo_traj[1]['next_observations'][es:es+max_len_e].reshape(1, -1, oppo_obs_dim))
+                    a_e_.append(oppo_traj[1]['actions'][es:es+max_len_e].reshape(1, -1, act_dim))
+                    r_e_.append(oppo_traj[1]['rewards'][es:es+max_len_e].reshape(1, -1, 1))
+                    timesteps_e_.append(np.arange((es+1), (es+1+n_o_e_[-1].shape[1])).reshape(1, -1))
+                    timesteps_e_[-1][timesteps_e_[-1] >= (num_steps+1)] = num_steps
+                    
+                    tlen_e = n_o_e_[-1].shape[1]
+                    
+                    n_o_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, oppo_obs_dim)), n_o_e_[-1]], axis=1)
+                    if config_dict["OBS_NORMALIZE"]:
+                        n_o_e_[-1] = (n_o_e_[-1] - oppo_obs_mean_list[i]) / oppo_obs_std_list[i]
+                    a_e_[-1] = np.concatenate([np.ones((1, max_len_e - tlen_e, act_dim)) * -10., a_e_[-1]], axis=1)
+                    r_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, 1)), r_e_[-1]], axis=1)
+                    timesteps_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e)), timesteps_e_[-1]], axis=1)
+                    mask_e_.append(np.concatenate([np.zeros((1, max_len_e - tlen_e)), np.ones((1, tlen_e))], axis=1))
+                n_o_e.append(np.concatenate(n_o_e_, axis=1))
+                a_e.append(np.concatenate(a_e_, axis=1))
+                r_e.append(np.concatenate(r_e_, axis=1))
+                timesteps_e.append(np.concatenate(timesteps_e_, axis=1))
+                mask_e.append(np.concatenate(mask_e_, axis=1))
+        for i in range(num_online_oppo_policy):
+            batch_inds = np.random.choice(
+                np.arange(online_num_trajs_list[i]),
+                size=batch_size,
+                replace=False,
+            )    # 得到索引
+            for k in range(batch_size):
+                traj = online_data[i][batch_inds[k]]
+                ds = np.random.randint(0, traj[0]['rewards'].shape[0])
+                o_d.append(traj[0]['observations'][ds:ds + max_len_d].reshape(1, -1, agent_obs_dim))
+                a_d.append(traj[0]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                r_d.append(traj[0]['rewards'][ds:ds + max_len_d].reshape(1, -1, 1))
+                timesteps_d.append(np.arange(ds, ds + o_d[-1].shape[1]).reshape(1, -1))
+                timesteps_d[-1][timesteps_d[-1] >= num_steps] = num_steps - 1  # padding cutoff
+                rtg_d.append(discount_cumsum(traj[0]['rewards'][ds:], gamma=1.)[:o_d[-1].shape[1] + 1].reshape(1, -1, 1))
+                if rtg_d[-1].shape[1] <= o_d[-1].shape[1]:
+                    rtg_d[-1] = np.concatenate([rtg_d[-1], np.zeros((1, 1, 1))], axis=1)
+                
+                tlen_d = o_d[-1].shape[1]
+                
+                o_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, agent_obs_dim)), o_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_d[-1] = (o_d[-1] - agent_obs_mean_list[i]) / agent_obs_std_list[i]
+                a_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_d[-1]], axis=1)
+                r_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), r_d[-1]], axis=1)
+                rtg_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), rtg_d[-1]], axis=1) / reward_scale
+                timesteps_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d)), timesteps_d[-1]], axis=1)
+                mask_d.append(np.concatenate([np.zeros((1, max_len_d - tlen_d)), np.ones((1, tlen_d))], axis=1))
+                
+                o_e_d.append(traj[1]['observations'][ds:ds + max_len_d].reshape(1, -1, oppo_obs_dim))
+                a_e_d.append(traj[1]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                
+                o_e_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, oppo_obs_dim)), o_e_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_e_d[-1] = (o_e_d[-1] - oppo_obs_mean_list[i]) / oppo_obs_std_list[i]
+                a_e_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_e_d[-1]], axis=1)
+                
+                oppo_batch_inds = np.random.choice(
+                    np.arange(online_num_trajs_list[i]),
+                    size=ocw_size,
+                    replace=False,
+                )
+                n_o_e_, a_e_, r_e_, timesteps_e_, mask_e_ = [], [], [], [], []
+                for j in range(ocw_size):
+                    oppo_traj = online_data[i][oppo_batch_inds[j]]
+                    es = np.random.randint(0, oppo_traj[1]['rewards'].shape[0])
+                    n_o_e_.append(oppo_traj[1]['next_observations'][es:es+max_len_e].reshape(1, -1, oppo_obs_dim))
+                    a_e_.append(oppo_traj[1]['actions'][es:es+max_len_e].reshape(1, -1, act_dim))
+                    r_e_.append(oppo_traj[1]['rewards'][es:es+max_len_e].reshape(1, -1, 1))
+                    timesteps_e_.append(np.arange((es+1), (es+1+n_o_e_[-1].shape[1])).reshape(1, -1))
+                    timesteps_e_[-1][timesteps_e_[-1] >= (num_steps+1)] = num_steps
+                    
+                    tlen_e = n_o_e_[-1].shape[1]
+                    
+                    n_o_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, oppo_obs_dim)), n_o_e_[-1]], axis=1)
+                    if config_dict["OBS_NORMALIZE"]:
+                        n_o_e_[-1] = (n_o_e_[-1] - oppo_obs_mean_list[i]) / oppo_obs_std_list[i]
+                    a_e_[-1] = np.concatenate([np.ones((1, max_len_e - tlen_e, act_dim)) * -10., a_e_[-1]], axis=1)
+                    r_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, 1)), r_e_[-1]], axis=1)
+                    timesteps_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e)), timesteps_e_[-1]], axis=1)
+                    mask_e_.append(np.concatenate([np.zeros((1, max_len_e - tlen_e)), np.ones((1, tlen_e))], axis=1))
+                n_o_e.append(np.concatenate(n_o_e_, axis=1))
+                a_e.append(np.concatenate(a_e_, axis=1))
+                r_e.append(np.concatenate(r_e_, axis=1))
+                timesteps_e.append(np.concatenate(timesteps_e_, axis=1))
+                mask_e.append(np.concatenate(mask_e_, axis=1))
+
+        o_d = torch.from_numpy(np.concatenate(o_d, axis=0)).to(dtype=torch.float32, device=device)
+        a_d = torch.from_numpy(np.concatenate(a_d, axis=0)).to(dtype=torch.float32, device=device)
+        r_d = torch.from_numpy(np.concatenate(r_d, axis=0)).to(dtype=torch.float32, device=device)
+        rtg_d = torch.from_numpy(np.concatenate(rtg_d, axis=0)).to(dtype=torch.float32, device=device)
+        timesteps_d = torch.from_numpy(np.concatenate(timesteps_d, axis=0)).to(dtype=torch.long, device=device)
+        mask_d = torch.from_numpy(np.concatenate(mask_d, axis=0)).to(device=device)
+
+        n_o_e = torch.from_numpy(np.concatenate(n_o_e, axis=0)).to(dtype=torch.float32, device=device)
+        a_e = torch.from_numpy(np.concatenate(a_e, axis=0)).to(dtype=torch.float32, device=device)
+        r_e = torch.from_numpy(np.concatenate(r_e, axis=0)).to(dtype=torch.float32, device=device)
+        timesteps_e = torch.from_numpy(np.concatenate(timesteps_e, axis=0)).to(dtype=torch.long, device=device)
+        mask_e = torch.from_numpy(np.concatenate(mask_e, axis=0)).to(device=device)
+        o_e_d = torch.from_numpy(np.concatenate(o_e_d, axis=0)).to(dtype=torch.float32, device=device)
+        a_e_d = torch.from_numpy(np.concatenate(a_e_d, axis=0)).to(dtype=torch.float32, device=device)
+        
+        return n_o_e, a_e, r_e, timesteps_e, mask_e, o_d, a_d, r_d, rtg_d, timesteps_d, mask_d, o_e_d, a_e_d
+    
+    return fn 
+
+
+def get_batch_mix_revise_new(offline_data, online_data, config_dict):
+    agent_obs_dim = config_dict["AGENT_OBS_DIM"]
+    oppo_obs_dim = config_dict["OPPO_OBS_DIM"]
+    act_dim = config_dict["ACT_DIM"]
+    num_offline_oppo_policy = len(offline_data)
+    num_online_oppo_policy = len(online_data)
+    offline_num_trajs_list = config_dict["NUM_TRAJS"]
+    online_num_trajs_list = [len(online_data[0])]
+    batch_size = config_dict["BATCH_SIZE"]
+    K_encoder = config_dict["K"]
+    K_decoder = config_dict["K"]
+    num_steps = config_dict["NUM_STEPS"]
+    if config_dict["OBS_NORMALIZE"]:
+        agent_obs_mean_list = config_dict["OFFLINE_AGENT_OBS_MEAN"]
+        agent_obs_std_list = config_dict["OFFLINE_AGENT_OBS_STD"]
+        oppo_obs_mean_list = config_dict["OFFLINE_OPPO_OBS_MEAN"]
+        oppo_obs_std_list = config_dict["OFFLINE_OPPO_OBS_STD"]
+    reward_scale = config_dict["REWARD_SCALE"]
+    device = config_dict["DEVICE"]
+    ocw_size = config_dict["OCW_SIZE"]   # 5
+    target_test = 0.5
+    def fn(batch_size=batch_size, max_len_e=K_encoder, max_len_d=K_decoder):
+        n_o_e, a_e, r_e, timesteps_e, mask_e = [], [], [], [], []
+        o_d, a_d, r_d, rtg_d, timesteps_d, mask_d = [], [], [], [], [], []
+        o_e_d, a_e_d = [], []
+        for i in range(num_offline_oppo_policy):
+            batch_inds = np.random.choice(
+                np.arange(offline_num_trajs_list[i]),
+                size=batch_size,
+                replace=False,
+            )    # 得到索引
+            for k in range(batch_size):
+                traj = offline_data[i][batch_inds[k]]
+                ds = np.random.randint(0, traj[0]['rewards'].shape[0])
+                o_d.append(traj[0]['observations'][ds:ds + max_len_d].reshape(1, -1, agent_obs_dim))
+                a_d.append(traj[0]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                r_d.append(traj[0]['rewards'][ds:ds + max_len_d].reshape(1, -1, 1))
+                timesteps_d.append(np.arange(ds, ds + o_d[-1].shape[1]).reshape(1, -1))
+                timesteps_d[-1][timesteps_d[-1] >= num_steps] = num_steps - 1  # padding cutoff
+                rtg_d.append(discount_cumsum(traj[0]['rewards'][ds:], gamma=1.)[:o_d[-1].shape[1] + 1].reshape(1, -1, 1))
+                if rtg_d[-1].shape[1] <= o_d[-1].shape[1]:
+                    rtg_d[-1] = np.concatenate([rtg_d[-1], np.zeros((1, 1, 1))], axis=1)
+                
+                tlen_d = o_d[-1].shape[1]
+                
+                o_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, agent_obs_dim)), o_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_d[-1] = (o_d[-1] - agent_obs_mean_list[i]) / agent_obs_std_list[i]
+                a_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_d[-1]], axis=1)
+                r_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), r_d[-1]], axis=1)
+                rtg_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), rtg_d[-1]], axis=1) / reward_scale
+                timesteps_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d)), timesteps_d[-1]], axis=1)
+                mask_d.append(np.concatenate([np.zeros((1, max_len_d - tlen_d)), np.ones((1, tlen_d))], axis=1))
+                
+                o_e_d.append(traj[1]['observations'][ds:ds + max_len_d].reshape(1, -1, oppo_obs_dim))
+                a_e_d.append(traj[1]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                
+                o_e_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, oppo_obs_dim)), o_e_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_e_d[-1] = (o_e_d[-1] - oppo_obs_mean_list[i]) / oppo_obs_std_list[i]
+                a_e_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_e_d[-1]], axis=1)
+                
+                oppo_batch_inds = np.random.choice(
+                    np.arange(offline_num_trajs_list[i]),
+                    size=ocw_size,
+                    replace=False,
+                )
+                n_o_e_, a_e_, r_e_, timesteps_e_, mask_e_ = [], [], [], [], []
+                for j in range(ocw_size):
+                    oppo_traj = offline_data[i][oppo_batch_inds[j]]
+                    es = np.random.randint(0, oppo_traj[1]['rewards'].shape[0])
+                    n_o_e_.append(oppo_traj[1]['next_observations'][es:es+max_len_e].reshape(1, -1, oppo_obs_dim))
+                    a_e_.append(oppo_traj[1]['actions'][es:es+max_len_e].reshape(1, -1, act_dim))
+                    r_e_.append(oppo_traj[1]['rewards'][es:es+max_len_e].reshape(1, -1, 1))
+                    timesteps_e_.append(np.arange((es+1), (es+1+n_o_e_[-1].shape[1])).reshape(1, -1))
+                    timesteps_e_[-1][timesteps_e_[-1] >= (num_steps+1)] = num_steps
+                    
+                    tlen_e = n_o_e_[-1].shape[1]
+                    
+                    n_o_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, oppo_obs_dim)), n_o_e_[-1]], axis=1)
+                    if config_dict["OBS_NORMALIZE"]:
+                        n_o_e_[-1] = (n_o_e_[-1] - oppo_obs_mean_list[i]) / oppo_obs_std_list[i]
+                    a_e_[-1] = np.concatenate([np.ones((1, max_len_e - tlen_e, act_dim)) * -10., a_e_[-1]], axis=1)
+                    r_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, 1)), r_e_[-1]], axis=1)
+                    timesteps_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e)), timesteps_e_[-1]], axis=1)
+                    mask_e_.append(np.concatenate([np.zeros((1, max_len_e - tlen_e)), np.ones((1, tlen_e))], axis=1))
+                n_o_e.append(np.concatenate(n_o_e_, axis=1))
+                a_e.append(np.concatenate(a_e_, axis=1))
+                r_e.append(np.concatenate(r_e_, axis=1))
+                timesteps_e.append(np.concatenate(timesteps_e_, axis=1))
+                mask_e.append(np.concatenate(mask_e_, axis=1))
+        for i in range(num_online_oppo_policy):
+            # batch_inds = np.random.choice(
+            #     np.arange(online_num_trajs_list[i]),
+            #     size=batch_size,
+            #     replace=False,
+            # )    # 得到索引
+
+            batch_inds = get_batch_inds_good(online_data , target_test)
+            for k in range(batch_size):
+                traj = online_data[i][batch_inds[k]]
+                ds = np.random.randint(0, traj[0]['rewards'].shape[0])
+                o_d.append(traj[0]['observations'][ds:ds + max_len_d].reshape(1, -1, agent_obs_dim))
+                a_d.append(traj[0]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                r_d.append(traj[0]['rewards'][ds:ds + max_len_d].reshape(1, -1, 1))
+                timesteps_d.append(np.arange(ds, ds + o_d[-1].shape[1]).reshape(1, -1))
+                timesteps_d[-1][timesteps_d[-1] >= num_steps] = num_steps - 1  # padding cutoff
+                rtg_d.append(discount_cumsum(traj[0]['rewards'][ds:], gamma=1.)[:o_d[-1].shape[1] + 1].reshape(1, -1, 1))
+                if rtg_d[-1].shape[1] <= o_d[-1].shape[1]:
+                    rtg_d[-1] = np.concatenate([rtg_d[-1], np.zeros((1, 1, 1))], axis=1)
+                
+                tlen_d = o_d[-1].shape[1]
+                
+                o_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, agent_obs_dim)), o_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_d[-1] = (o_d[-1] - agent_obs_mean_list[i]) / agent_obs_std_list[i]
+                a_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_d[-1]], axis=1)
+                r_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), r_d[-1]], axis=1)
+                rtg_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, 1)), rtg_d[-1]], axis=1) / reward_scale
+                timesteps_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d)), timesteps_d[-1]], axis=1)
+                mask_d.append(np.concatenate([np.zeros((1, max_len_d - tlen_d)), np.ones((1, tlen_d))], axis=1))
+                
+                o_e_d.append(traj[1]['observations'][ds:ds + max_len_d].reshape(1, -1, oppo_obs_dim))
+                a_e_d.append(traj[1]['actions'][ds:ds + max_len_d].reshape(1, -1, act_dim))
+                
+                o_e_d[-1] = np.concatenate([np.zeros((1, max_len_d - tlen_d, oppo_obs_dim)), o_e_d[-1]], axis=1)
+                if config_dict["OBS_NORMALIZE"]:
+                    o_e_d[-1] = (o_e_d[-1] - oppo_obs_mean_list[i]) / oppo_obs_std_list[i]
+                a_e_d[-1] = np.concatenate([np.ones((1, max_len_d - tlen_d, act_dim)) * -10., a_e_d[-1]], axis=1)
+                
+                oppo_batch_inds = np.random.choice(
+                    np.arange(online_num_trajs_list[i]),
+                    size=ocw_size,
+                    replace=False,
+                )
+                n_o_e_, a_e_, r_e_, timesteps_e_, mask_e_ = [], [], [], [], []
+                for j in range(ocw_size):
+                    oppo_traj = online_data[i][oppo_batch_inds[j]]
+                    es = np.random.randint(0, oppo_traj[1]['rewards'].shape[0])
+                    n_o_e_.append(oppo_traj[1]['next_observations'][es:es+max_len_e].reshape(1, -1, oppo_obs_dim))
+                    a_e_.append(oppo_traj[1]['actions'][es:es+max_len_e].reshape(1, -1, act_dim))
+                    r_e_.append(oppo_traj[1]['rewards'][es:es+max_len_e].reshape(1, -1, 1))
+                    timesteps_e_.append(np.arange((es+1), (es+1+n_o_e_[-1].shape[1])).reshape(1, -1))
+                    timesteps_e_[-1][timesteps_e_[-1] >= (num_steps+1)] = num_steps
+                    
+                    tlen_e = n_o_e_[-1].shape[1]
+                    
+                    n_o_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, oppo_obs_dim)), n_o_e_[-1]], axis=1)
+                    if config_dict["OBS_NORMALIZE"]:
+                        n_o_e_[-1] = (n_o_e_[-1] - oppo_obs_mean_list[i]) / oppo_obs_std_list[i]
+                    a_e_[-1] = np.concatenate([np.ones((1, max_len_e - tlen_e, act_dim)) * -10., a_e_[-1]], axis=1)
+                    r_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e, 1)), r_e_[-1]], axis=1)
+                    timesteps_e_[-1] = np.concatenate([np.zeros((1, max_len_e - tlen_e)), timesteps_e_[-1]], axis=1)
+                    mask_e_.append(np.concatenate([np.zeros((1, max_len_e - tlen_e)), np.ones((1, tlen_e))], axis=1))
+                n_o_e.append(np.concatenate(n_o_e_, axis=1))
+                a_e.append(np.concatenate(a_e_, axis=1))
+                r_e.append(np.concatenate(r_e_, axis=1))
+                timesteps_e.append(np.concatenate(timesteps_e_, axis=1))
+                mask_e.append(np.concatenate(mask_e_, axis=1))
+
+        o_d = torch.from_numpy(np.concatenate(o_d, axis=0)).to(dtype=torch.float32, device=device)
+        a_d = torch.from_numpy(np.concatenate(a_d, axis=0)).to(dtype=torch.float32, device=device)
+        r_d = torch.from_numpy(np.concatenate(r_d, axis=0)).to(dtype=torch.float32, device=device)
+        rtg_d = torch.from_numpy(np.concatenate(rtg_d, axis=0)).to(dtype=torch.float32, device=device)
+        timesteps_d = torch.from_numpy(np.concatenate(timesteps_d, axis=0)).to(dtype=torch.long, device=device)
+        mask_d = torch.from_numpy(np.concatenate(mask_d, axis=0)).to(device=device)
+
+        n_o_e = torch.from_numpy(np.concatenate(n_o_e, axis=0)).to(dtype=torch.float32, device=device)
+        a_e = torch.from_numpy(np.concatenate(a_e, axis=0)).to(dtype=torch.float32, device=device)
+        r_e = torch.from_numpy(np.concatenate(r_e, axis=0)).to(dtype=torch.float32, device=device)
+        timesteps_e = torch.from_numpy(np.concatenate(timesteps_e, axis=0)).to(dtype=torch.long, device=device)
+        mask_e = torch.from_numpy(np.concatenate(mask_e, axis=0)).to(device=device)
+        o_e_d = torch.from_numpy(np.concatenate(o_e_d, axis=0)).to(dtype=torch.float32, device=device)
+        a_e_d = torch.from_numpy(np.concatenate(a_e_d, axis=0)).to(dtype=torch.float32, device=device)
+        
+        return n_o_e, a_e, r_e, timesteps_e, mask_e, o_d, a_d, r_d, rtg_d, timesteps_d, mask_d, o_e_d, a_e_d
+    
+    return fn 
+
+
+def get_batch_inds(online_data, target_test):
+    num_all = len(online_data[0])
+    sum = np.zeros(num_all)
+    list_up = [[]]
+    list_down = [[]]
+    for k in range(num_all):
+        for i in range(100):
+            sum[k] = sum[k] + online_data[0][k][0]["rewards"][i]
+    num_up = 0
+    num_up_list = []
+    num_down = 0
+    num_down_list = []
+    for j in range(num_all):
+        if(sum[j]>target_test):
+            list_up[0].append(online_data[0][j])
+            num_up_list.append(j)
+            num_up = num_up + 1
+        else :
+            list_down[0].append(online_data[0][j])
+            num_down_list.append(j)
+            num_down = num_down + 1
+    
+    rate = (num_up*3)/(num_up*3+num_down)     # 好的数据多训练
+    batch_inds_up = np.random.choice(
+        np.arange(num_up),
+        size=(int)(128*rate),
+        replace=False,
+    )
+    batch_inds_down = np.random.choice(
+        np.arange(num_down),
+        size=128-(int)(128*rate),
+        replace=False,        
+    )
+    batch_inds = []
+    for i in range(len(batch_inds_up)):
+        batch_inds.append(num_up_list[batch_inds_up[i]])
+    for j in range(len(batch_inds_down)):
+        batch_inds.append(num_down_list[batch_inds_down[j]])
+    random.shuffle(batch_inds)
+    return batch_inds
+
+
+
+def get_batch_inds_good(online_data, target_test):
+    num_all = len(online_data[0])
+    sum = np.zeros(num_all)
+    list_up = [[]]
+    for k in range(num_all):
+        for i in range(len(online_data[0][k][0]["rewards"])):
+            sum[k] = sum[k] + online_data[0][k][0]["rewards"][i]
+    num_up = 0
+    num_up_list = []
+    for j in range(num_all):
+        if(sum[j]>target_test):
+            list_up[0].append(online_data[0][j])
+            num_up_list.append(j)
+            num_up = num_up + 1
+    batch_inds_up = np.random.choice(
+        np.arange(num_up),
+        size=128,
+        replace=False,
+    )
+    batch_inds = []
+    for i in range(len(batch_inds_up)):
+        batch_inds.append(num_up_list[batch_inds_up[i]])
+    random.shuffle(batch_inds)
+    return batch_inds

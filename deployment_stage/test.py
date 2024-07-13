@@ -1,5 +1,6 @@
 import argparse
 import os, sys
+import pickle
 sys.path.insert(1, os.path.join(sys.path[0], '..'))
 import time
 from offline_stage_1.net import GPTEncoder
@@ -81,6 +82,7 @@ def main(args):
         CONFIG_DICT["OPPO_OBS_MEAN"] = oppo_obs_mean_list
         CONFIG_DICT["OPPO_OBS_STD"] = oppo_obs_std_list
     
+
     with open(f"utility/{test_mode}_oppo_indexes.npy", 'rb') as f:
         test_oppo_indexes = np.load(f)
         CONFIG_DICT["TEST_OPPO_INDEXES"] = test_oppo_indexes
@@ -108,7 +110,7 @@ def main(args):
         add_cross_attention=False,
     )
     encoder = encoder.to(device=device)
-    encoder.load_model(args.encoder_param_path, device=device)
+    # encoder.load_model(args.encoder_param_path, device=device)
     encoder.eval()
     
     decoder = GPTDecoder(
@@ -129,7 +131,7 @@ def main(args):
         add_cross_attention=True,
     )
     decoder = decoder.to(device=device)
-    decoder.load_model(decoder_path, device=device)
+    # decoder.load_model(decoder_path, device=device)
     decoder.eval()
     
     if log_to_wandb:
@@ -160,10 +162,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # ---------- NOTE: TAO testing ----------
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", type=str, default='cuda:0')
-    parser.add_argument("--project_name", type=str, default="TEST-MS")
+    parser.add_argument("--device", type=str, default='cuda:2')
+    # parser.add_argument("--project_name", type=str, default="TEST-MS")
     # * remember to change ENV_TYPE in '../offline_stage_2/config.py' file to PA when testing on PA
-    # parser.add_argument("--project_name", type=str, default="TEST-PA")
+    parser.add_argument("--project_name", type=str, default="TEST-PA-evaluate")
     parser.add_argument("--num_test", type=int, default=2500)
     parser.add_argument("--switch_interval", type=int, default=50)
     parser.add_argument("--test_mode", type=str, default="mix", choices=["seen", "unseen", "mix"])
@@ -173,7 +175,7 @@ if __name__ == '__main__':
         args.encoder_param_path = '../offline_stage_2/model/MS-pretrained_models/res_encoder_iter_1999'
         args.decoder_param_path = '../offline_stage_2/model/MS-pretrained_models/res_decoder_iter_1999'
     elif "PA" in args.project_name:  # * PA
-        args.encoder_param_path = '../offline_stage_2/model/PA-pretrained_models/res_encoder_iter_1999'
+        args.encoder_param_path = '../offline_stage_2/model/PA-pretrained_models/res_encoder_iter_1999'   
         args.decoder_param_path = '../offline_stage_2/model/PA-pretrained_models/res_decoder_iter_1999'
     
     main(args)

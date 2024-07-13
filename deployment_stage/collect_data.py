@@ -38,7 +38,7 @@ def collect_data():
 
     log_to_wandb = Config.WANDB
 
-    device = 'cuda:0'
+    device = 'cuda:2'
     test_mode = "unseen"
     # num_test = 100
     # switch_interval = 100
@@ -52,7 +52,7 @@ def collect_data():
     agent_index = Config.AGENT_INDEX
     oppo_index = Config.OPPO_INDEX
 
-    decoder_path = '../offline_stage_2/model/PA-pretrained_models/res_decoder_iter_1999'
+    decoder_path = '../offline_stage_2/model/MS-pretrained_models/res_decoder_iter_1999'
     data_path = Config.OFFLINE_DATA_PATH
 
     seen_oppo_policy = Config.SEEN_OPPO_POLICY
@@ -113,7 +113,7 @@ def collect_data():
         add_cross_attention=False,
     )
     encoder = encoder.to(device=device)
-    encoder.load_model('../offline_stage_2/model/PA-pretrained_models/res_encoder_iter_1999', device=device)
+    encoder.load_model('../offline_stage_2/model/MS-pretrained_models/res_encoder_iter_1999', device=device)
     encoder.eval()
 
     decoder = GPTDecoder(
@@ -151,8 +151,8 @@ def collect_data():
         encoder=encoder,
         decoder=decoder,
         env_and_test_oppo=env_and_test_oppo,
-        num_test=100,
-        switch_interval=100,
+        num_test=200,
+        switch_interval=50,
         test_oppo_policy=test_oppo_policy,
         config=CONFIG_DICT,
         log_to_wandb=log_to_wandb,
@@ -161,6 +161,7 @@ def collect_data():
     online_data = load_online_data(oppo_context_w)
 
     # print(online_data[0])
+
     return online_data
     LOG.info(f"Finish testing TAO.")
 

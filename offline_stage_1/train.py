@@ -7,7 +7,6 @@ from offline_stage_1.net import GPTEncoder
 from offline_stage_1.nn_trainer import PolicyEmbeddingTrainer
 from offline_stage_1.utils import (
     get_batch,
-    get_batch_mix,
     load_oppo_data,
     cal_obs_mean,
     CrossEntropy,
@@ -25,8 +24,7 @@ def main():
     obs_dim = Config.OBS_DIM        # o 对手的观察向量维度
     act_dim = Config.ACT_DIM        # a 对手的动作向量维度
     num_steps = Config.NUM_STEPS    # 每个 episode 的最大步骤数
-
-
+    
     exp_id = Config.EXP_ID
     seed = Config.SEED_PEL
     torch.manual_seed(seed)
@@ -68,16 +66,7 @@ def main():
         obs_mean_list, obs_std_list = cal_obs_mean(offline_data, total=average_total_obs)
         CONFIG_DICT["OBS_MEAN"] = obs_mean_list
         CONFIG_DICT["OBS_STD"] = obs_std_list
-
-    # online_data = None
-    # use_online = Config.USE_ONLINE
-    # if use_online:
-    #     get_true_data = get_batch_mix(offline_data,online_data,CONFIG_DICT)
-    # else :
-    #     get_true_data = get_batch(offline_data, CONFIG_DICT)
-
-
-
+    
     exp_prefix = env_type
     num_oppo_policy = len(offline_data)
     group_name = f'{exp_prefix}-{num_oppo_policy}oppo'
@@ -153,7 +142,7 @@ def main():
         
         if log_to_wandb:
             wandb.log(outputs)
-
+    
     trainer.save_model(
         postfix=f"_iter_{i}",
         save_dir=save_model_dir,
